@@ -5,6 +5,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, Tuple
 
+from dotenv import load_dotenv
+
+_BASE_DIR = Path(__file__).resolve().parent.parent
+for env_name in (".env.local", ".env"):
+    env_path = _BASE_DIR / env_name
+    if env_path.exists():
+        load_dotenv(dotenv_path=env_path, override=False)
+
 
 @dataclass
 class Settings:
