@@ -36,6 +36,7 @@ class LecturesService:
         self,
         db: Session,
         payload: LectureDownloadRequest,
+        user_id: UUID,
         background_tasks: Optional[BackgroundTasks] = None,
     ) -> tuple[Lecture, bool]:
         session_id = extract_panopto_session_id(payload.panopto_url)
@@ -65,7 +66,7 @@ class LecturesService:
             db.add(lecture)
             created = True
 
-        self._ensure_user_link(db, payload.user_id, lecture.id)
+        self._ensure_user_link(db, user_id, lecture.id)
         db.commit()
 
         if created and background_tasks is not None:

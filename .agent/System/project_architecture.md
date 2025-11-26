@@ -5,6 +5,7 @@ StudyBuddy Backend is a FastAPI service that orchestrates Panopto lecture audio 
 
 ## Tech Stack
 - **API**: FastAPI (`app/main.py`) with Pydantic schemas in `app/schemas.py`.
+- **Auth**: Clerk session tokens are verified in `app/auth.py`; every route depends on `require_user` to resolve the signed-in UUID.
 - **Database**: PostgreSQL accessed through SQLAlchemy ORM (`app/db.py`, `app/models.py`).
 - **Storage abstraction**: `app/storage.py` exposes `StorageBackend` and `LocalStorageBackend` for filesystem persistence.
 - **Panopto pipeline**: `app/downloader.py` defines `PanoptoDownloader` (HTTP implementation) and `AudioExtractor` (FFmpeg-based) used by `LecturesService`.
@@ -72,6 +73,8 @@ storage/             # Local asset roots (documents/, audio_tmp/)
 | POST | `/api/documents/upload` | Upload/attach a PDF to a course + user. |
 | GET | `/api/documents/{document_id}` | Document metadata (no storage info). |
 | GET | `/api/documents/{document_id}/file` | Stream PDF bytes for linked user. |
+
+All routes require a valid Clerk session token in the `Authorization` header or `__session` cookie; `app/auth.py` resolves the UUID used for authorization checks, so clients never submit `user_id` explicitly.
 
 ## Related Docs
 - [Database Schema](database_schema.md)

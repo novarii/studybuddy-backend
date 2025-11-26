@@ -16,6 +16,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy.exc import NoResultFound
 from sqlalchemy.orm import Session
 
+from .auth import AuthenticatedUser, require_user
 from .config import settings
 from .db import get_db
 from .documents_service import DocumentsService
@@ -47,9 +48,15 @@ async def trigger_lecture_download(
     payload: LectureDownloadRequest,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
+    current_user: AuthenticatedUser = Depends(require_user),
 ):
     try:
-        lecture, created = lectures_service.request_download(db, payload, background_tasks)
+        lecture, created = lectures_service.request_download(
+            db,
+            payload,
+            user_id=current_user.user_id,
+            background_tasks=background_tasks,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
@@ -61,11 +68,11 @@ async def trigger_lecture_download(
 @app.get("/api/lectures/{lecture_id}", response_model=LectureDetailResponse)
 async def get_lecture(
     lecture_id: UUID,
-    user_id: UUID,
     db: Session = Depends(get_db),
+    current_user: AuthenticatedUser = Depends(require_user),
 ):
     try:
-        lecture = lectures_service.fetch_lecture_for_user(db, lecture_id, user_id)
+        lecture = lectures_service.fetch_lecture_for_user(db, lecture_id, current_user.user_id)
     except NoResultFound:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lecture not found")
 
@@ -86,11 +93,11 @@ async def get_lecture(
 @app.get("/api/lectures/{lecture_id}/status", response_model=LectureStatusResponse)
 async def get_lecture_status(
     lecture_id: UUID,
-    user_id: UUID,
     db: Session = Depends(get_db),
+    current_user: AuthenticatedUser = Depends(require_user),
 ):
     try:
-        lecture = lectures_service.fetch_lecture_for_user(db, lecture_id, user_id)
+        lecture = lectures_service.fetch_lecture_for_user(db, lecture_id, current_user.user_id)
     except NoResultFound:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lecture not found")
 
@@ -105,9 +112,9 @@ async def get_lecture_status(
 @app.post("/api/documents/upload", response_model=DocumentUploadResponse)
 async def upload_document(
     course_id: UUID = Form(...),
-    user_id: UUID = Form(...),
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
+    current_user: AuthenticatedUser = Depends(require_user),
 ):
     filename = file.filename or ""
     if not filename.lower().endswith(".pdf"):
@@ -119,7 +126,7 @@ async def upload_document(
     document, created = documents_service.upload_document(
         db,
         course_id=course_id,
-        user_id=user_id,
+        user_id=current_user.user_id,
         filename=file.filename,
         content_type=file.content_type,
         file_bytes=file_bytes,
@@ -132,11 +139,11 @@ async def upload_document(
 @app.get("/api/documents/{document_id}", response_model=DocumentDetailResponse)
 async def get_document(
     document_id: UUID,
-    user_id: UUID,
     db: Session = Depends(get_db),
+    current_user: AuthenticatedUser = Depends(require_user),
 ):
     try:
-        document = documents_service.fetch_document_for_user(db, document_id, user_id)
+        document = documents_service.fetch_document_for_user(db, document_id, current_user.user_id)
     except NoResultFound:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
 
@@ -156,11 +163,11 @@ async def get_document(
 @app.get("/api/documents/{document_id}/file")
 async def download_document_file(
     document_id: UUID,
-    user_id: UUID,
     db: Session = Depends(get_db),
+    current_user: AuthenticatedUser = Depends(require_user),
 ):
     try:
-        document = documents_service.fetch_document_for_user(db, document_id, user_id)
+        document = documents_service.fetch_document_for_user(db, document_id, current_user.user_id)
     except NoResultFound:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
 

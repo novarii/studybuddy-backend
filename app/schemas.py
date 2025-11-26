@@ -11,7 +11,6 @@ from .models import DocumentStatus, LectureStatus
 
 class LectureDownloadRequest(BaseModel):
     course_id: UUID
-    user_id: UUID
     panopto_url: constr(strip_whitespace=True, min_length=1)
     title: Optional[str] = None
 
