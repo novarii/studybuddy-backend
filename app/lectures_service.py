@@ -1,0 +1,196 @@
+from __future__ import annotations
+
+import logging
+from typing import Optional
+from uuid import UUID, uuid4
+
+from fastapi import BackgroundTasks
+from sqlalchemy import and_, select
+from sqlalchemy.exc import NoResultFound
+from sqlalchemy.orm import Session
+
+from .db import SessionLocal
+from .downloader import AudioExtractionError, AudioExtractor, DownloadError, PanoptoDownloader
+from .models import Lecture, LectureStatus, UserLecture
+from .schemas import LectureDownloadRequest
+from .storage import StorageBackend
+from .utils import extract_panopto_session_id
+
+logger = logging.getLogger(__name__)
+
+
+class LecturesService:
+    """Encapsulates lecture persistence and download workflows."""
+
+    def __init__(
+        self,
+        storage: StorageBackend,
+        downloader: PanoptoDownloader,
+        extractor: AudioExtractor,
+    ) -> None:
+        self.storage = storage
+        self.downloader = downloader
+        self.extractor = extractor
+
+    def request_download(
+        self,
+        db: Session,
+        payload: LectureDownloadRequest,
+        background_tasks: Optional[BackgroundTasks] = None,
+    ) -> tuple[Lecture, bool]:
+        session_id = extract_panopto_session_id(payload.panopto_url)
+        lecture = (
+            db.execute(
+                select(Lecture).where(
+                    and_(
+                        Lecture.course_id == payload.course_id,
+                        Lecture.panopto_session_id == session_id,
+                    )
+                )
+            )
+            .scalars()
+            .first()
+        )
+
+        created = False
+        if lecture is None:
+            lecture = Lecture(
+                id=uuid4(),
+                course_id=payload.course_id,
+                panopto_session_id=session_id,
+                panopto_url=payload.panopto_url,
+                title=payload.title,
+                status=LectureStatus.pending,
+            )
+            db.add(lecture)
+            created = True
+
+        self._ensure_user_link(db, payload.user_id, lecture.id)
+        db.commit()
+
+        if created and background_tasks is not None:
+            background_tasks.add_task(self._run_download_pipeline, lecture.id)
+
+        return lecture, created
+
+    def fetch_lecture_for_user(self, db: Session, lecture_id: UUID, user_id: UUID) -> Lecture:
+        stmt = (
+            select(Lecture)
+            .join(UserLecture, UserLecture.lecture_id == Lecture.id)
+            .where(UserLecture.user_id == user_id, Lecture.id == lecture_id)
+        )
+        lecture = db.execute(stmt).scalars().first()
+        if lecture is None:
+            raise NoResultFound("Lecture not found for user")
+        return lecture
+
+    def remove_user_from_lecture(self, db: Session, lecture_id: UUID, user_id: UUID) -> None:
+        link = (
+            db.execute(
+                select(UserLecture).where(
+                    UserLecture.user_id == user_id, UserLecture.lecture_id == lecture_id
+                )
+            )
+            .scalars()
+            .first()
+        )
+        if link is None:
+            return
+        db.delete(link)
+        db.flush()
+
+        remaining = (
+            db.execute(
+                select(UserLecture).where(UserLecture.lecture_id == lecture_id).limit(1)
+            )
+            .scalars()
+            .first()
+        )
+        if remaining is None:
+            lecture = db.get(Lecture, lecture_id)
+            if lecture:
+                self._cleanup_lecture_assets(lecture)
+                db.delete(lecture)
+        db.commit()
+
+    def _run_download_pipeline(self, lecture_id: UUID) -> None:
+        db = SessionLocal()
+        temp_keys: list[str] = []
+        try:
+            lecture = db.get(Lecture, lecture_id)
+            if lecture is None:
+                return
+
+            lecture.status = LectureStatus.downloading
+            lecture.error_message = None
+            db.commit()
+
+            video_storage_key = f"audio_tmp/{lecture.id}_source.mp4"
+            download_result = self.downloader.download_video(
+                lecture.panopto_url,
+                self.storage,
+                video_storage_key,
+            )
+            temp_keys.append(download_result.storage_key)
+            audio_storage_key = f"audio/{lecture.id}.m4a"
+            audio_result = self.extractor.extract_audio(
+                self.storage, download_result.storage_key, audio_storage_key
+            )
+            temp_keys.append(audio_result.storage_key)
+            lecture.audio_storage_key = audio_result.storage_key
+            lecture.duration_seconds = audio_result.duration_seconds
+            lecture.status = LectureStatus.completed
+            lecture.error_message = None
+            db.commit()
+
+            self.storage.delete_file(download_result.storage_key)
+        except DownloadError as exc:
+            logger.exception("Panopto download failed for lecture %s", lecture_id)
+            self._mark_failure(db, lecture_id, str(exc), temp_keys=temp_keys)
+        except AudioExtractionError as exc:
+            logger.exception("Audio extraction failed for lecture %s", lecture_id)
+            self._mark_failure(db, lecture_id, str(exc), temp_keys=temp_keys)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.exception("Audio pipeline failed for lecture %s", lecture_id)
+            self._mark_failure(db, lecture_id, str(exc), temp_keys=temp_keys)
+        finally:
+            db.close()
+
+    def _mark_failure(
+        self,
+        db: Session,
+        lecture_id: UUID,
+        error_message: str,
+        temp_keys: Optional[list[str]] = None,
+    ) -> None:
+        lecture = db.get(Lecture, lecture_id)
+        if lecture is None:
+            return
+        lecture.status = LectureStatus.failed
+        lecture.error_message = error_message[:1024]
+        lecture.audio_storage_key = None
+        db.commit()
+
+        if temp_keys:
+            for key in temp_keys:
+                self.storage.delete_file(key)
+
+    def _ensure_user_link(self, db: Session, user_id: UUID, lecture_id: UUID) -> None:
+        exists = (
+            db.execute(
+                select(UserLecture).where(
+                    UserLecture.user_id == user_id,
+                    UserLecture.lecture_id == lecture_id,
+                )
+            )
+            .scalars()
+            .first()
+        )
+        if exists is None:
+            db.add(UserLecture(user_id=user_id, lecture_id=lecture_id))
+
+    def _cleanup_lecture_assets(self, lecture: Lecture) -> None:
+        if lecture.audio_storage_key:
+            self.storage.delete_file(lecture.audio_storage_key)
+        if lecture.transcript_storage_key:
+            self.storage.delete_file(lecture.transcript_storage_key)
