@@ -23,7 +23,8 @@ from .auth import AuthenticatedUser, require_user
 from .config import settings
 from .db import get_db
 from .documents_service import DocumentsService
-from .downloader import FFmpegAudioExtractor, HttpPanoptoDownloader
+from .downloader import FFmpegAudioExtractor
+from .panopto_downloader import PanoptoPackageDownloader
 from .lectures_service import LecturesService
 from .models import Lecture
 from .schemas import (
@@ -52,7 +53,7 @@ app.add_middleware(
 storage_backend = LocalStorageBackend(settings.storage_root)
 lectures_service = LecturesService(
     storage=storage_backend,
-    downloader=HttpPanoptoDownloader(),
+    downloader=PanoptoPackageDownloader(),
     extractor=FFmpegAudioExtractor(),
 )
 documents_service = DocumentsService(storage_backend)
@@ -79,6 +80,7 @@ async def list_dev_lectures(db: Session = Depends(get_db)):
     )
     return [
         LectureStatusListItem(
+            id=lecture.id,
             title=lecture.title,
             status=lecture.status,
             created_at=lecture.created_at,

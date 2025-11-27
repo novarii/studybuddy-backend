@@ -41,6 +41,7 @@ class Settings:
         )
     )
     dev_routes_enabled: bool = os.getenv("DEV_ROUTES_ENABLED", "false").lower() in {"1", "true", "yes"}
+    direct_stream_required: bool = os.getenv("DIRECT_STREAM_REQUIRED", "true").lower() in {"1", "true", "yes"}
 
 
 settings = Settings()

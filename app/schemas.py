@@ -64,6 +64,7 @@ class CourseResponse(BaseModel):
 
 
 class LectureStatusListItem(BaseModel):
+    id: UUID
     title: Optional[str]
     status: LectureStatus
     created_at: datetime

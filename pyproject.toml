@@ -5,6 +5,7 @@ requires-python = ">=3.12.0"
 dependencies = [
     "clerk-backend-api>=4.0.0",
     "fastapi>=0.115.6,<1.0.0",
+    "panoptodownloader",
     "psycopg2-binary>=2.9.10,<3.0.0",
     "pydantic>=2.10.0,<3.0.0",
     "python-dotenv>=1.0.1,<2.0.0",
@@ -13,3 +14,6 @@ dependencies = [
     "sqlalchemy>=2.0.35,<3.0.0",
     "uvicorn>=0.34.0,<1.0.0",
 ]
+
+[tool.uv.sources]
+panoptodownloader = { git = "https://github.com/novarii/Panopto-Video-DL-lib.git", rev = "relax-yarl" }
