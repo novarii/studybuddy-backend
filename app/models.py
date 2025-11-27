@@ -29,6 +29,17 @@ class User(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
+class Course(Base):
+    __tablename__ = "courses"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    code = Column(Text, nullable=False, unique=True)
+    title = Column(Text, nullable=False)
+    instructor = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
 class LectureStatus(str, enum.Enum):
     pending = "pending"
     downloading = "downloading"

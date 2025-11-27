@@ -62,7 +62,9 @@ class DocumentDetailResponse(BaseModel):
 
 class CourseResponse(BaseModel):
     id: UUID
-    name: str
+    code: str
+    title: str
+    instructor: Optional[str]
 
 
 class LectureStatusListItem(BaseModel):
