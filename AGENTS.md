@@ -2,7 +2,6 @@
 
 ## Docs
 - We keep all important docs in .agent folder and keep them updated. This is the structure:
-
 .agent
 - Tasks: PRD & implementation plan for each feature
 - System: Document the current state of the system (project structure, tech stack, integration points, database schema, and core functionalities)
@@ -15,8 +14,7 @@
 
 ## Build and Development Commands
 - `python -m venv .venv && source .venv/bin/activate` — create a clean env before dependency installs.
-- `pip install -r requirements.txt` or `uv pip install -r requirements.txt` — install FastAPI, SQLAlchemy, psycopg2, and PanoptoDownloader dependencies.
-- `uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload` — local dev server with auto-reload; use `python -m app.main` for parity with production.
+- `uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload` — local dev server with auto-reload; use `uv run app.main` for parity with production.
 
 ## Coding Style & Naming Conventions
 - Follow PEP 8 with 4-space indentation, snake_case functions, and PascalCase for Pydantic models and SQLAlchemy classes. Keep type hints and docstrings describing side effects.

@@ -23,6 +23,7 @@ from .documents_service import DocumentsService
 from .downloader import FFmpegAudioExtractor, HttpPanoptoDownloader
 from .lectures_service import LecturesService
 from .schemas import (
+    CourseResponse,
     DocumentDetailResponse,
     DocumentUploadResponse,
     LectureDetailResponse,
@@ -41,6 +42,20 @@ lectures_service = LecturesService(
     extractor=FFmpegAudioExtractor(),
 )
 documents_service = DocumentsService(storage_backend)
+
+MOCK_COURSES = [
+    CourseResponse(id=UUID("11111111-1111-1111-1111-111111111111"), name="CSC 252")
+]
+
+
+@app.get("/api/health")
+async def health_check():
+    return {"status": "ok"}
+
+
+@app.get("/api/courses", response_model=list[CourseResponse])
+async def list_courses(current_user: AuthenticatedUser = Depends(require_user)):
+    return MOCK_COURSES
 
 
 @app.post("/api/lectures/download", response_model=LectureDownloadResponse)
