@@ -85,12 +85,13 @@ class Lecture(Base):
 class Document(Base):
     __tablename__ = "documents"
     __table_args__ = (
-        UniqueConstraint("course_id", "checksum", name="uq_course_checksum"),
+        UniqueConstraint("owner_id", "course_id", "checksum", name="uq_owner_course_checksum"),
         Index("idx_documents_course_id", "course_id"),
         Index("idx_documents_checksum", "checksum"),
     )
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    owner_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     course_id = Column(UUID(as_uuid=True), nullable=False)
     filename = Column(Text, nullable=False)
     storage_key = Column(Text, nullable=False)
@@ -107,8 +108,6 @@ class Document(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
-    user_links = relationship("UserDocument", back_populates="document", cascade="all, delete-orphan")
-
 
 class UserLecture(Base):
     __tablename__ = "user_lectures"
@@ -124,17 +123,3 @@ class UserLecture(Base):
 
     lecture = relationship("Lecture", back_populates="user_links")
 
-
-class UserDocument(Base):
-    __tablename__ = "user_documents"
-    __table_args__ = (Index("idx_user_documents_document_id", "document_id"),)
-
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
-    document_id = Column(
-        UUID(as_uuid=True),
-        ForeignKey("documents.id", ondelete="CASCADE"),
-        primary_key=True,
-    )
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-
-    document = relationship("Document", back_populates="user_links")

@@ -169,6 +169,23 @@ async def get_lecture_status(
     )
 
 
+@app.delete("/api/lectures/{lecture_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_lecture(
+    lecture_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: AuthenticatedUser = Depends(require_user),
+):
+    if current_user.user_id in settings.admin_user_ids:
+        try:
+            lectures_service.delete_lecture(db, lecture_id)
+        except NoResultFound:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lecture not found")
+    else:
+        lectures_service.fetch_lecture_for_user(db, lecture_id, current_user.user_id)
+        lectures_service.remove_user_from_lecture(db, lecture_id, current_user.user_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @app.post("/api/documents/upload", response_model=DocumentUploadResponse)
 async def upload_document(
     response: Response,
@@ -243,3 +260,20 @@ async def download_document_file(
         "Content-Disposition": f'attachment; filename="{document.filename}"'
     }
     return StreamingResponse(file_stream, media_type=document.mime_type, headers=headers)
+
+
+@app.delete("/api/documents/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_document(
+    document_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: AuthenticatedUser = Depends(require_user),
+):
+    if current_user.user_id in settings.admin_user_ids:
+        try:
+            documents_service.delete_document(db, document_id)
+        except NoResultFound:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+    else:
+        documents_service.fetch_document_for_user(db, document_id, current_user.user_id)
+        documents_service.remove_user_from_document(db, document_id, current_user.user_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

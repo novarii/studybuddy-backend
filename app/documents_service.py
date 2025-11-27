@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import NoResultFound
 from sqlalchemy.orm import Session
 
-from .models import Document, DocumentStatus, UserDocument
+from .models import Document, DocumentStatus
 from .storage import StorageBackend
 from .users_service import ensure_user_exists
 
@@ -35,6 +35,7 @@ class DocumentsService:
         document = (
             db.execute(
                 select(Document).where(
+                    Document.owner_id == user_id,
                     Document.course_id == course_id,
                     Document.checksum == checksum,
                 )
@@ -44,12 +45,14 @@ class DocumentsService:
         )
         created = False
         if document is None:
+            ensure_user_exists(db, user_id)
             document_id = uuid4()
             storage_key = f"documents/{document_id}.pdf"
             file_stream = io.BytesIO(file_bytes)
             meta = self.storage.store_file(storage_key, file_stream, mime_type=content_type)
             document = Document(
                 id=document_id,
+                owner_id=user_id,
                 course_id=course_id,
                 filename=os.path.basename(filename) or "document.pdf",
                 storage_key=storage_key,
@@ -63,16 +66,13 @@ class DocumentsService:
             db.add(document)
             created = True
 
-        ensure_user_exists(db, user_id)
-        self._ensure_user_link(db, user_id, document.id)
         db.commit()
         return document, created
 
     def fetch_document_for_user(self, db: Session, document_id: UUID, user_id: UUID) -> Document:
         stmt = (
             select(Document)
-            .join(UserDocument, UserDocument.document_id == Document.id)
-            .where(UserDocument.user_id == user_id, Document.id == document_id)
+            .where(Document.owner_id == user_id, Document.id == document_id)
         )
         document = db.execute(stmt).scalars().first()
         if document is None:
@@ -80,45 +80,26 @@ class DocumentsService:
         return document
 
     def remove_user_from_document(self, db: Session, document_id: UUID, user_id: UUID) -> None:
-        link = (
+        document = (
             db.execute(
-                select(UserDocument).where(
-                    UserDocument.user_id == user_id,
-                    UserDocument.document_id == document_id,
+                select(Document).where(
+                    Document.owner_id == user_id,
+                    Document.id == document_id,
                 )
             )
             .scalars()
             .first()
         )
-        if link is None:
+        if document is None:
             return
-        db.delete(link)
-        db.flush()
-
-        remaining = (
-            db.execute(
-                select(UserDocument).where(UserDocument.document_id == document_id).limit(1)
-            )
-            .scalars()
-            .first()
-        )
-        if remaining is None:
-            document = db.get(Document, document_id)
-            if document:
-                self.storage.delete_file(document.storage_key)
-                db.delete(document)
+        self.storage.delete_file(document.storage_key)
+        db.delete(document)
         db.commit()
 
-    def _ensure_user_link(self, db: Session, user_id: UUID, document_id: UUID) -> None:
-        link = (
-            db.execute(
-                select(UserDocument).where(
-                    UserDocument.user_id == user_id,
-                    UserDocument.document_id == document_id,
-                )
-            )
-            .scalars()
-            .first()
-        )
-        if link is None:
-            db.add(UserDocument(user_id=user_id, document_id=document_id))
+    def delete_document(self, db: Session, document_id: UUID) -> None:
+        document = db.get(Document, document_id)
+        if document is None:
+            raise NoResultFound("Document not found")
+        self.storage.delete_file(document.storage_key)
+        db.delete(document)
+        db.commit()

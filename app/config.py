@@ -4,6 +4,7 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, Tuple
+from uuid import UUID
 
 from dotenv import load_dotenv
 
@@ -42,6 +43,13 @@ class Settings:
     )
     dev_routes_enabled: bool = os.getenv("DEV_ROUTES_ENABLED", "false").lower() in {"1", "true", "yes"}
     direct_stream_required: bool = os.getenv("DIRECT_STREAM_REQUIRED", "true").lower() in {"1", "true", "yes"}
+    admin_user_ids: Tuple[UUID, ...] = field(
+        default_factory=lambda: tuple(
+            UUID(raw.strip())
+            for raw in os.getenv("ADMIN_USER_IDS", "").split(",")
+            if raw.strip()
+        )
+    )
 
 
 settings = Settings()

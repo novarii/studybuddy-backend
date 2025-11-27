@@ -1,7 +1,6 @@
 .venv/
-env.local/
+.env.local
 .DS_Store
-.venv
 AGENTS.md
 __pycache__/
 storage/

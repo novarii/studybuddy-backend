@@ -121,6 +121,14 @@ class LecturesService:
                 db.delete(lecture)
         db.commit()
 
+    def delete_lecture(self, db: Session, lecture_id: UUID) -> None:
+        lecture = db.get(Lecture, lecture_id)
+        if lecture is None:
+            raise NoResultFound("Lecture not found")
+        self._cleanup_lecture_assets(lecture)
+        db.delete(lecture)
+        db.commit()
+
     def _run_download_pipeline(self, lecture_id: UUID) -> None:
         db = SessionLocal()
         temp_keys: list[str] = []
