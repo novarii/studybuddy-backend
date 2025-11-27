@@ -61,11 +61,16 @@ class LecturesService:
                 course_id=payload.course_id,
                 panopto_session_id=session_id,
                 panopto_url=payload.panopto_url,
+                stream_url=payload.stream_url,
                 title=payload.title,
                 status=LectureStatus.pending,
             )
             db.add(lecture)
             created = True
+        else:
+            lecture.panopto_url = payload.panopto_url
+            lecture.stream_url = payload.stream_url
+            lecture.title = payload.title or lecture.title
 
         ensure_user_exists(db, user_id)
         self._ensure_user_link(db, user_id, lecture.id)
@@ -130,7 +135,7 @@ class LecturesService:
 
             video_storage_key = f"audio_tmp/{lecture.id}_source.mp4"
             download_result = self.downloader.download_video(
-                lecture.panopto_url,
+                lecture.stream_url,
                 self.storage,
                 video_storage_key,
             )

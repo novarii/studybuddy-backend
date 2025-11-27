@@ -52,6 +52,7 @@ class Lecture(Base):
     course_id = Column(UUID(as_uuid=True), nullable=False)
     panopto_session_id = Column(String, nullable=True)
     panopto_url = Column(Text, nullable=False)
+    stream_url = Column(Text, nullable=False)
     title = Column(Text, nullable=True)
     audio_storage_key = Column(String, nullable=True)
     transcript_storage_key = Column(String, nullable=True)

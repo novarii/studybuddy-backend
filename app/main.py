@@ -133,6 +133,7 @@ async def get_lecture(
         course_id=lecture.course_id,
         panopto_session_id=lecture.panopto_session_id,
         panopto_url=lecture.panopto_url,
+        stream_url=lecture.stream_url,
         title=lecture.title,
         duration_seconds=lecture.duration_seconds,
         status=lecture.status,

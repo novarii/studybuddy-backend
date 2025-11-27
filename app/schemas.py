@@ -12,6 +12,7 @@ from .models import DocumentStatus, LectureStatus
 class LectureDownloadRequest(BaseModel):
     course_id: UUID
     panopto_url: constr(strip_whitespace=True, min_length=1)
+    stream_url: constr(strip_whitespace=True, min_length=1)
     title: Optional[str] = None
 
 
@@ -32,6 +33,7 @@ class LectureDetailResponse(BaseModel):
     course_id: UUID
     panopto_session_id: Optional[str]
     panopto_url: str
+    stream_url: str
     title: Optional[str]
     duration_seconds: Optional[int]
     status: LectureStatus

@@ -4,3 +4,4 @@ env.local/
 .venv
 AGENTS.md
 __pycache__/
+storage/
