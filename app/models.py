@@ -5,6 +5,7 @@ import uuid
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     Column,
     DateTime,
     Enum,
@@ -36,6 +37,7 @@ class Course(Base):
     code = Column(Text, nullable=False, unique=True)
     title = Column(Text, nullable=False)
     instructor = Column(Text, nullable=True)
+    is_official = Column(Boolean, nullable=False, server_default="false")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
