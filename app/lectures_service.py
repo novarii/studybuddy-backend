@@ -14,6 +14,7 @@ from .downloader import AudioExtractionError, AudioExtractor, DownloadError, Pan
 from .models import Lecture, LectureStatus, UserLecture
 from .schemas import LectureDownloadRequest
 from .storage import StorageBackend
+from .users_service import ensure_user_exists
 from .utils import extract_panopto_session_id
 
 logger = logging.getLogger(__name__)
@@ -66,6 +67,7 @@ class LecturesService:
             db.add(lecture)
             created = True
 
+        ensure_user_exists(db, user_id)
         self._ensure_user_link(db, user_id, lecture.id)
         db.commit()
 

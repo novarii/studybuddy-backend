@@ -9,10 +9,13 @@ from fastapi import (
     File,
     Form,
     HTTPException,
+    Response,
     UploadFile,
     status,
 )
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
+from sqlalchemy import select
 from sqlalchemy.exc import NoResultFound
 from sqlalchemy.orm import Session
 
@@ -22,6 +25,7 @@ from .db import get_db
 from .documents_service import DocumentsService
 from .downloader import FFmpegAudioExtractor, HttpPanoptoDownloader
 from .lectures_service import LecturesService
+from .models import Lecture
 from .schemas import (
     CourseResponse,
     DocumentDetailResponse,
@@ -29,11 +33,21 @@ from .schemas import (
     LectureDetailResponse,
     LectureDownloadRequest,
     LectureDownloadResponse,
+    LectureStatusListItem,
     LectureStatusResponse,
 )
 from .storage import LocalStorageBackend
 
 app = FastAPI(title="StudyBuddy Backend")
+
+allow_origins = settings.cors_allow_origins or ["*"]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=list(allow_origins),
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 storage_backend = LocalStorageBackend(settings.storage_root)
 lectures_service = LecturesService(
@@ -53,6 +67,27 @@ async def health_check():
     return {"status": "ok"}
 
 
+@app.get("/api/dev/lectures", response_model=list[LectureStatusListItem])
+async def list_dev_lectures(db: Session = Depends(get_db)):
+    if not settings.dev_routes_enabled:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    lectures = (
+        db.execute(select(Lecture).order_by(Lecture.created_at.desc()))
+        .scalars()
+        .all()
+    )
+    return [
+        LectureStatusListItem(
+            title=lecture.title,
+            status=lecture.status,
+            created_at=lecture.created_at,
+            updated_at=lecture.updated_at,
+        )
+        for lecture in lectures
+    ]
+
+
 @app.get("/api/courses", response_model=list[CourseResponse])
 async def list_courses(current_user: AuthenticatedUser = Depends(require_user)):
     return MOCK_COURSES
@@ -62,6 +97,7 @@ async def list_courses(current_user: AuthenticatedUser = Depends(require_user)):
 async def trigger_lecture_download(
     payload: LectureDownloadRequest,
     background_tasks: BackgroundTasks,
+    response: Response,
     db: Session = Depends(get_db),
     current_user: AuthenticatedUser = Depends(require_user),
 ):
@@ -75,9 +111,8 @@ async def trigger_lecture_download(
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
-    response = LectureDownloadResponse(lecture_id=lecture.id, status=lecture.status)
-    status_code = status.HTTP_201_CREATED if created else status.HTTP_200_OK
-    return JSONResponse(status_code=status_code, content=response.model_dump())
+    response.status_code = status.HTTP_201_CREATED if created else status.HTTP_200_OK
+    return LectureDownloadResponse(lecture_id=lecture.id, status=lecture.status)
 
 
 @app.get("/api/lectures/{lecture_id}", response_model=LectureDetailResponse)
@@ -126,6 +161,7 @@ async def get_lecture_status(
 
 @app.post("/api/documents/upload", response_model=DocumentUploadResponse)
 async def upload_document(
+    response: Response,
     course_id: UUID = Form(...),
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
@@ -146,9 +182,12 @@ async def upload_document(
         content_type=file.content_type,
         file_bytes=file_bytes,
     )
-    response = DocumentUploadResponse(document_id=document.id, course_id=document.course_id, status=document.status)
-    status_code = status.HTTP_201_CREATED if created else status.HTTP_200_OK
-    return JSONResponse(status_code=status_code, content=response.model_dump())
+    response.status_code = status.HTTP_201_CREATED if created else status.HTTP_200_OK
+    return DocumentUploadResponse(
+        document_id=document.id,
+        course_id=document.course_id,
+        status=document.status,
+    )
 
 
 @app.get("/api/documents/{document_id}", response_model=DocumentDetailResponse)

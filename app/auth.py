@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 from uuid import UUID
+import uuid
 
 from fastapi import HTTPException, Request, status
 from clerk_backend_api.security import AuthenticateRequestOptions, authenticate_request
@@ -48,10 +49,12 @@ def require_user(request: Request) -> AuthenticatedUser:
     if raw_user_id is None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Token is missing a user identifier")
 
+    raw_user_id_str = str(raw_user_id)
     try:
-        user_id = UUID(str(raw_user_id))
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid user identifier in token") from exc
+        user_id = UUID(raw_user_id_str)
+    except ValueError:
+        # Generate a deterministic UUID from any non-UUID Clerk identifier to keep DB schema stable.
+        user_id = uuid.uuid5(uuid.NAMESPACE_URL, raw_user_id_str)
 
     return AuthenticatedUser(
         user_id=user_id,

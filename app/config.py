@@ -33,6 +33,14 @@ class Settings:
             if party.strip()
         )
     )
+    cors_allow_origins: Tuple[str, ...] = field(
+        default_factory=lambda: tuple(
+            origin.strip()
+            for origin in os.getenv("CORS_ALLOW_ORIGINS", "").split(",")
+            if origin.strip()
+        )
+    )
+    dev_routes_enabled: bool = os.getenv("DEV_ROUTES_ENABLED", "false").lower() in {"1", "true", "yes"}
 
 
 settings = Settings()

@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from .models import Document, DocumentStatus, UserDocument
 from .storage import StorageBackend
+from .users_service import ensure_user_exists
 
 
 class DocumentsService:
@@ -62,6 +63,7 @@ class DocumentsService:
             db.add(document)
             created = True
 
+        ensure_user_exists(db, user_id)
         self._ensure_user_link(db, user_id, document.id)
         db.commit()
         return document, created
