@@ -20,3 +20,6 @@
 - Follow PEP 8 with 4-space indentation, snake_case functions, and PascalCase for Pydantic models and SQLAlchemy classes. Keep type hints and docstrings describing side effects.
 - Route handlers should remain thin: place database queries, file operations, and external API calls inside service modules. Keep configuration (storage paths, database URLs) in environment variables or config files.
 - Database operations should use SQLAlchemy ORM; prefer service methods over inline queries to keep routes readable.
+
+## Important notice
+- Run local git commands with higher permissions settings a recent macOS sandbox change blocked Codex from writing inside .git
