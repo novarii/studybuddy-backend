@@ -9,13 +9,18 @@ from sqlalchemy import and_, select
 from sqlalchemy.exc import NoResultFound
 from sqlalchemy.orm import Session
 
-from .db import SessionLocal
-from .downloader import AudioExtractionError, AudioExtractor, DownloadError, PanoptoDownloader
-from .models import Lecture, LectureStatus, UserLecture
-from .schemas import LectureDownloadRequest
-from .storage import StorageBackend
+from ..core.utils import extract_panopto_session_id
+from ..database.db import SessionLocal
+from ..database.models import Lecture, LectureStatus, UserLecture
+from ..schemas import LectureDownloadRequest
+from ..storage import StorageBackend
+from .downloaders.downloader import (
+    AudioExtractionError,
+    AudioExtractor,
+    DownloadError,
+    PanoptoDownloader,
+)
 from .users_service import ensure_user_exists
-from .utils import extract_panopto_session_id
 
 logger = logging.getLogger(__name__)
 

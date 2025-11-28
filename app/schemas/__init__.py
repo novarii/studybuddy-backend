@@ -6,7 +6,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, constr
 
-from .models import DocumentStatus, LectureStatus
+from ..database.models import DocumentStatus, LectureStatus
 
 
 class LectureDownloadRequest(BaseModel):

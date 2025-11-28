@@ -10,8 +10,8 @@ from sqlalchemy import select
 from sqlalchemy.exc import NoResultFound
 from sqlalchemy.orm import Session
 
-from .models import Document, DocumentStatus
-from .storage import StorageBackend
+from ..database.models import Document, DocumentStatus
+from ..storage import StorageBackend
 from .users_service import ensure_user_exists
 
 

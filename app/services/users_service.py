@@ -4,7 +4,7 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
-from .models import User
+from ..database.models import User
 
 
 def ensure_user_exists(db: Session, user_id: UUID) -> None:

@@ -19,14 +19,10 @@ from sqlalchemy import select
 from sqlalchemy.exc import NoResultFound
 from sqlalchemy.orm import Session
 
-from .auth import AuthenticatedUser, require_user
-from .config import settings
-from .db import get_db
-from .documents_service import DocumentsService
-from .downloader import FFmpegAudioExtractor
-from .panopto_downloader import PanoptoPackageDownloader
-from .lectures_service import LecturesService
-from .models import Course, Lecture
+from .api.auth import AuthenticatedUser, require_user
+from .core.config import settings
+from .database.db import get_db
+from .database.models import Course, Lecture
 from .schemas import (
     CourseResponse,
     DocumentDetailResponse,
@@ -37,6 +33,10 @@ from .schemas import (
     LectureStatusListItem,
     LectureStatusResponse,
 )
+from .services.documents_service import DocumentsService
+from .services.downloaders.downloader import FFmpegAudioExtractor
+from .services.downloaders.panopto_downloader import PanoptoPackageDownloader
+from .services.lectures_service import LecturesService
 from .storage import LocalStorageBackend
 
 app = FastAPI(title="StudyBuddy Backend")

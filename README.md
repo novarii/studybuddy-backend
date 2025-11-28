@@ -31,8 +31,8 @@ FastAPI service providing Panopto lecture ingestion and PDF document uploads for
 
 ## Architecture Notes
 
-- HTTP routes live in `app/main.py` and proxy to services (`app/lectures_service.py`, `app/documents_service.py`).
-- SQLAlchemy models and enums are defined in `app/models.py`; database access uses `app/db.py`.
-- File persistence flows through the storage abstraction (`app/storage.py`). Local disk storage is the default implementation and keeps files under `storage/documents/` and `storage/audio_tmp/`.
+- HTTP routes live in `app/main.py` and proxy to the service layer under `app/services/` (for example `app/services/lectures_service.py` and `app/services/documents_service.py`).
+- SQLAlchemy models and enums are defined in `app/database/models.py`; database access utilities live beside them in `app/database/db.py`.
+- File persistence flows through the storage abstraction provided by `app/storage/`. Local disk storage is the default implementation and keeps files under `storage/documents/` and `storage/audio_tmp/`.
 - The Panopto download pipeline is orchestrated by `LecturesService` using `PanoptoPackageDownloader` (adapter around the PanoptoDownloader PyPI package) and `FFmpegAudioExtractor`. Audio files persist temporarily (logical keys `audio/{lecture_id}.m4a`).
 - Document uploads compute SHA256 checksums to deduplicate **per user per course** (`documents.owner_id`), so each user controls their own uploads.

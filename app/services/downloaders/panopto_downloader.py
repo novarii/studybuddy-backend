@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import os
 import tempfile
 import uuid
 from pathlib import Path
@@ -11,7 +10,7 @@ from PanoptoDownloader import download as panopto_download
 from PanoptoDownloader import exceptions as panopto_exceptions
 
 from .downloader import DownloadError, DownloadResult, PanoptoDownloader as DownloaderInterface
-from .storage import StorageBackend
+from ...storage import StorageBackend
 
 logger = logging.getLogger(__name__)
 

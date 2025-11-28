@@ -8,7 +8,8 @@ from uuid import UUID
 
 from dotenv import load_dotenv
 
-_BASE_DIR = Path(__file__).resolve().parent.parent
+# Resolve repo root so .env files remain discoverable after moving this module to app/core.
+_BASE_DIR = Path(__file__).resolve().parent.parent.parent
 for env_name in (".env.local", ".env"):
     env_path = _BASE_DIR / env_name
     if env_path.exists():

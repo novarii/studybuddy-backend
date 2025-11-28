@@ -1,14 +1,14 @@
 from __future__ import annotations
 
+import uuid
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 from uuid import UUID
-import uuid
 
 from fastapi import HTTPException, Request, status
 from clerk_backend_api.security import AuthenticateRequestOptions, authenticate_request
 
-from .config import settings
+from ..core.config import settings
 
 
 @dataclass

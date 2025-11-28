@@ -11,7 +11,7 @@ from typing import BinaryIO, Optional
 
 import requests
 
-from .storage import StorageBackend
+from ...storage import StorageBackend
 
 logger = logging.getLogger(__name__)
 
