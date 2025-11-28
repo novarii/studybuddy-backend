@@ -19,9 +19,10 @@ FastAPI service providing Panopto lecture ingestion and PDF document uploads for
 
 3. **Run migrations**
    ```bash
-   psql "$DATABASE_URL" -f migrations/versions/001_initial.sql
+   docker compose up -d db
+   ./scripts/run_migrations.sh
    ```
-   The SQL script creates enums, tables, indexes, and timestamp triggers as described in `.agent/Tasks/studybuddy_initial_phase.md`.
+   The helper script applies every SQL migration under `migrations/versions/` in order so the schema always matches the latest code.
 
 4. **Start the API**
    ```bash
@@ -33,5 +34,5 @@ FastAPI service providing Panopto lecture ingestion and PDF document uploads for
 - HTTP routes live in `app/main.py` and proxy to services (`app/lectures_service.py`, `app/documents_service.py`).
 - SQLAlchemy models and enums are defined in `app/models.py`; database access uses `app/db.py`.
 - File persistence flows through the storage abstraction (`app/storage.py`). Local disk storage is the default implementation and keeps files under `storage/documents/` and `storage/audio_tmp/`.
-- The Panopto download pipeline is orchestrated by `LecturesService` using `HttpPanoptoDownloader` and `FFmpegAudioExtractor` from `app/downloader.py`. Audio files persist temporarily (logical keys `audio/{lecture_id}.m4a`).
-- Document uploads compute SHA256 checksums to deduplicate per course and share files via `user_documents` links.
+- The Panopto download pipeline is orchestrated by `LecturesService` using `PanoptoPackageDownloader` (adapter around the PanoptoDownloader PyPI package) and `FFmpegAudioExtractor`. Audio files persist temporarily (logical keys `audio/{lecture_id}.m4a`).
+- Document uploads compute SHA256 checksums to deduplicate **per user per course** (`documents.owner_id`), so each user controls their own uploads.

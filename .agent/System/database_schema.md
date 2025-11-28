@@ -1,6 +1,6 @@
 # Database Schema
 
-Schema is provisioned by `migrations/versions/001_initial.sql`. PostgreSQL is the source of truth for all metadata (files are referenced via logical storage keys only).
+Schema is provisioned by the SQL migrations under `migrations/versions/` (001–005 as of now). PostgreSQL is the source of truth for all metadata (files are referenced via logical storage keys only).
 
 ## Enumerations
 - `lecture_status`: `pending`, `downloading`, `completed`, `failed`.
@@ -13,7 +13,8 @@ Schema is provisioned by `migrations/versions/001_initial.sql`. PostgreSQL is th
 | id | UUID PK | `gen_random_uuid()` default. |
 | course_id | UUID | Foreign key to `courses` concept (no FK yet). |
 | panopto_session_id | TEXT nullable | Derived from `panopto_url`; unique per `course_id`. |
-| panopto_url | TEXT | Original submission URL. |
+| panopto_url | TEXT | Viewer URL kept for deep links. |
+| stream_url | TEXT | Direct podcast URL used by the downloader. |
 | title | TEXT nullable | Optional metadata. |
 | audio_storage_key | TEXT nullable | Temp audio path `audio/{id}.m4a`. |
 | transcript_storage_key | TEXT nullable | Reserved for future transcripts `transcripts/{id}.json`. |
@@ -32,6 +33,7 @@ Constraints & indexes:
 | Column | Type | Notes |
 | --- | --- | --- |
 | id | UUID PK | `gen_random_uuid()`. |
+| owner_id | UUID FK | References `users(id)`; the document belongs to exactly one user. |
 | course_id | UUID | Course grouping. |
 | filename | TEXT | Original client filename. |
 | storage_key | TEXT | Logical key `documents/{id}.pdf`. |
@@ -44,7 +46,7 @@ Constraints & indexes:
 | created_at / updated_at | TIMESTAMPTZ | Managed via defaults + trigger. |
 
 Constraints & indexes:
-- `UNIQUE(course_id, checksum)` ensures dedup inside a course.
+- `UNIQUE(owner_id, course_id, checksum)` ensures dedup per user per course.
 - `idx_documents_course_id`, `idx_documents_checksum` for lookups.
 - Trigger `trg_documents_updated_at` updates `updated_at`.
 
@@ -60,17 +62,23 @@ Associative table linking users to lectures.
 Indexes:
 - `idx_user_lectures_lecture_id` (lecture → users lookup).
 
-### user_documents
-Associative table linking users to documents.
+### courses
+Holds canonical course metadata.
 
 | Column | Type | Notes |
 | --- | --- | --- |
-| user_id | UUID PK/FK | References `users(id)` ON DELETE CASCADE. |
-| document_id | UUID PK/FK | References `documents(id)` ON DELETE CASCADE. |
-| created_at | TIMESTAMPTZ | Default `now()`. |
+| id | UUID PK | `gen_random_uuid()` default. |
+| code | TEXT UNIQUE | e.g., `CSC 173`. |
+| title | TEXT | Full course title. |
+| instructor | TEXT nullable | Instructor name. |
+| is_official | BOOLEAN | Defaults to `false`, reserved for catalog validation. |
+| created_at / updated_at | TIMESTAMPTZ | Timestamps with auto-update trigger. |
 
 Indexes:
-- `idx_user_documents_document_id`.
+- `uq_courses_code` keeps codes unique for now.
+
+### users
+Minimal table to satisfy foreign keys and cascading cleanup (id + timestamps). Rows are inserted lazily via `ensure_user_exists` whenever a user uploads data.
 
 ### Supporting Objects
 - `set_updated_at()` trigger function ensures `updated_at` is refreshed on row updates for both `lectures` and `documents`.
@@ -78,7 +86,7 @@ Indexes:
 
 ## Data Lifecycles
 - **Lecture statuses**: transitions from `pending` → `downloading` → (`completed` | `failed`). `error_message` captures transient failures. Temporary storage keys are cleaned when `fail` occurs or when lecture is orphaned.
-- **Document deduplication**: checksum duplicates reuse metadata; user-document link ensures access control. Deleting the final link removes the document row and storage file.
+- **Document deduplication**: checksum uniqueness is scoped to the owner so each user controls their own uploads. Removing a document deletes the storage file immediately.
 
 ## Related Docs
 - [Project Architecture](project_architecture.md)

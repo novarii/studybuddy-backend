@@ -8,10 +8,10 @@ StudyBuddy Backend is a FastAPI service that orchestrates Panopto lecture audio 
 - **Auth**: Clerk session tokens are verified in `app/auth.py`; every route depends on `require_user` to resolve the signed-in UUID.
 - **Database**: PostgreSQL accessed through SQLAlchemy ORM (`app/db.py`, `app/models.py`).
 - **Storage abstraction**: `app/storage.py` exposes `StorageBackend` and `LocalStorageBackend` for filesystem persistence.
-- **Panopto pipeline**: `app/downloader.py` defines `PanoptoDownloader` (HTTP implementation) and `AudioExtractor` (FFmpeg-based) used by `LecturesService`.
+- **Panopto pipeline**: `app/downloader.py` defines the storage/audio interfaces and `app/panopto_downloader.py` supplies the production downloader powered by the external `PanoptoDownloader` package, drastically improving reliability over raw HTTP fetches.
 - **Services**: `app/lectures_service.py` and `app/documents_service.py` handle business logic, deduplication, and orchestration.
 - **Config**: `app/config.py` centralizes environment-driven settings (database URL, storage roots/prefixes).
-- **Migrations**: SQL files under `migrations/versions/` contain schema setup.
+- **Migrations**: SQL files under `migrations/versions/` contain schema setup. `scripts/run_migrations.sh` pipes them into the Dockerized Postgres instance in order for quick resets.
 
 ## Project Structure
 ```
@@ -21,7 +21,8 @@ app/
   models.py          # ORM models & enums for lectures/documents/link tables
   schemas.py         # Pydantic request/response models
   storage.py         # StorageBackend interface + local implementation
-  downloader.py      # PanoptoDownloader + FFmpeg audio extractor
+  downloader.py      # Storage + FFmpeg audio extractor interfaces
+  panopto_downloader.py # Adapter around PanoptoDownloader PyPI package
   lectures_service.py# Lecture ingestion, background pipeline, cleanup
   documents_service.py# PDF upload + dedup + user linking
   utils.py           # Helpers (e.g., Panopto session ID extraction)
@@ -32,11 +33,11 @@ storage/             # Local asset roots (documents/, audio_tmp/)
 
 ## Core Flows
 ### Lecture Download
-1. Client POSTs to `/api/lectures/download` with `course_id`, `user_id`, `panopto_url`, optional `title` (`app/main.py`).
+1. Client POSTs to `/api/lectures/download` with `course_id`, `panopto_url` (viewer link), `stream_url` (direct podcast URL), optional `title` (`app/main.py`).
 2. `LecturesService.request_download(...)` checks `(course_id, panopto_session_id)` for duplicates, links the user, and enqueues `_run_download_pipeline` via FastAPI `BackgroundTasks`.
 3. Pipeline (`app/lectures_service.py`):
    - Marks lecture as `downloading`.
-   - Uses `HttpPanoptoDownloader` to stream the video into temporary storage key `audio_tmp/{lecture_id}_source.mp4` via `StorageBackend`.
+   - Uses `PanoptoPackageDownloader` to stream the direct podcast URL into temporary storage key `audio_tmp/{lecture_id}_source.mp4` via `StorageBackend`.
    - Converts to audio with `FFmpegAudioExtractor`, writing `audio/{lecture_id}.m4a` via storage.
    - Updates `duration_seconds`, keeps audio key for later transcription, deletes temporary video file, and marks status `completed`.
    - On failure, sets `status='failed'`, stores `error_message`, and cleans up temp keys.
@@ -45,13 +46,15 @@ storage/             # Local asset roots (documents/, audio_tmp/)
 ### Document Upload
 1. Client POSTs `/api/documents/upload` with multipart PDF `file`, `course_id`, `user_id` (`app/main.py`).
 2. Handler enforces PDF MIME/extension and reads bytes.
-3. `DocumentsService.upload_document(...)` computes SHA256 checksum, checks for duplicates per course, writes bytes to `documents/{document_id}.pdf` via storage, stores metadata (size, mime, status), and links user.
+3. `DocumentsService.upload_document(...)` computes SHA256 checksum, ensures the owning user exists, checks for duplicates scoped to that user & course, writes bytes to `documents/{document_id}.pdf`, and stores metadata with `owner_id`.
 4. `GET /api/documents/{id}` returns metadata while hiding storage paths/checksums.
 5. `GET /api/documents/{id}/file` streams the stored PDF, still verifying user association.
 
+Deleting a document removes both the metadata row and the physical file because each record now belongs to exactly one user.
+
 ### User Linking & Cleanup
-- Association tables `user_lectures` and `user_documents` capture which users may access resources.
-- Service methods (`remove_user_from_lecture`, `remove_user_from_document`) delete associations, remove orphaned metadata rows, and delete storage assets when no users remain.
+- Lecture access remains in `user_lectures`; deleting the final link destroys the lecture and attached audio assets.
+- Documents are truly single-owner; `documents.owner_id` holds the FK and deleting the doc removes the file immediately.
 
 ## Background Tasks & External Dependencies
 - **Panopto downloads**: `requests` library pulls video bytes over HTTP. Actual Panopto auth/tokenization must be supplied by upstream callers.
@@ -67,14 +70,18 @@ storage/             # Local asset roots (documents/, audio_tmp/)
 ## API Surface
 | Method | Path | Description |
 | --- | --- | --- |
+| GET | `/api/courses` | Lists courses owned by the authenticated user (now backed by DB rows). |
 | POST | `/api/lectures/download` | Create/queue a lecture download job (idempotent per course/session). |
 | GET | `/api/lectures/{lecture_id}` | Full lecture metadata for linked user. |
 | GET | `/api/lectures/{lecture_id}/status` | Compact status view (lectures). |
+| DELETE | `/api/lectures/{lecture_id}` | Remove user association or, for admins, hard-delete the lecture. |
 | POST | `/api/documents/upload` | Upload/attach a PDF to a course + user. |
 | GET | `/api/documents/{document_id}` | Document metadata (no storage info). |
 | GET | `/api/documents/{document_id}/file` | Stream PDF bytes for linked user. |
+| DELETE | `/api/documents/{document_id}` | Delete the owner’s document (admins can remove any document). |
+| GET | `/api/dev/lectures` | Dev-only listing of lectures (requires `DEV_ROUTES_ENABLED=true`). |
 
-All routes require a valid Clerk session token in the `Authorization` header or `__session` cookie; `app/auth.py` resolves the UUID used for authorization checks, so clients never submit `user_id` explicitly.
+All routes require a valid Clerk session token in the `Authorization` header or `__session` cookie; `app/auth.py` resolves the UUID used for authorization checks, so clients never submit `user_id` explicitly. Admin overrides are controlled by `ADMIN_USER_IDS` in configuration.
 
 ## Related Docs
 - [Database Schema](database_schema.md)
