@@ -6,6 +6,10 @@ import sys
 import uuid
 from pathlib import Path
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 from app.core.config import settings
 from app.services.transcription_service import TranscriptionError, WhisperTranscriptionClient
 from app.storage import LocalStorageBackend
@@ -43,7 +47,7 @@ def main() -> int:
         storage.store_file(temp_key, audio_stream, mime_type="audio/mp4")
 
     try:
-        transcript = client.transcribe(storage, temp_key)
+        transcription = client.transcribe(storage, temp_key)
     except TranscriptionError as exc:
         print(f"Transcription failed: {exc}", file=sys.stderr)
         return 2
@@ -51,7 +55,14 @@ def main() -> int:
         storage.delete_file(temp_key)
 
     print("Transcript:")
-    print(transcript)
+    print(transcription.text)
+    if transcription.segments:
+        print(f"\nSegments available: {len(transcription.segments)}")
+        preview = transcription.segments[0]
+        print(f"First segment preview: {preview}")
+    if transcription.vtt_content:
+        print("\nVTT content excerpt:")
+        print("\n".join(transcription.vtt_content.splitlines()[:4]))
     return 0
 
 

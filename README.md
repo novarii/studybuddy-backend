@@ -36,4 +36,5 @@ FastAPI service providing Panopto lecture ingestion and PDF document uploads for
 - SQLAlchemy models and enums are defined in `app/database/models.py`; database access utilities live beside them in `app/database/db.py`.
 - File persistence flows through the storage abstraction provided by `app/storage/`. Local disk storage is the default implementation and keeps files under `storage/documents/` and `storage/audio_tmp/`.
 - The Panopto download pipeline is orchestrated by `LecturesService` using `PanoptoPackageDownloader` (adapter around the PanoptoDownloader PyPI package) and `FFmpegAudioExtractor`. Audio files persist temporarily (logical keys `audio/{lecture_id}.m4a`).
+- Successful runs store Whisper transcription payloads (text + segments + VTT) as JSON files under `storage/transcripts/{lecture_id}.json` so downstream jobs can reuse the metadata.
 - Document uploads compute SHA256 checksums to deduplicate **per user per course** (`documents.owner_id`), so each user controls their own uploads.

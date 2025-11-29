@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import time
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Any, Dict, Optional
 
 import requests
 
@@ -11,6 +12,16 @@ from ..storage import StorageBackend
 
 class TranscriptionError(RuntimeError):
     """Raised when the Whisper server cannot return a transcript."""
+
+
+@dataclass
+class TranscriptionResult:
+    """Structured transcription payload returned by the Whisper service."""
+
+    text: str
+    segments: Optional[list[dict[str, Any]]]
+    vtt_content: Optional[str]
+    raw_payload: Dict[str, Any]
 
 
 class WhisperTranscriptionClient:
@@ -31,7 +42,7 @@ class WhisperTranscriptionClient:
         self.poll_interval = poll_interval
         self.poll_timeout = poll_timeout
 
-    def transcribe(self, storage: StorageBackend, audio_storage_key: str) -> str:
+    def transcribe(self, storage: StorageBackend, audio_storage_key: str) -> TranscriptionResult:
         """Upload audio referenced by storage_key and block until the transcript is ready."""
 
         task_id = self._submit_transcription_job(storage, audio_storage_key)
@@ -63,7 +74,7 @@ class WhisperTranscriptionClient:
             raise TranscriptionError("Whisper server response missing task_id")
         return task_id
 
-    def _wait_for_transcription(self, task_id: str) -> str:
+    def _wait_for_transcription(self, task_id: str) -> TranscriptionResult:
         url = f"{self.base_url}/result/{task_id}"
         deadline = time.monotonic() + self.poll_timeout
 
@@ -79,10 +90,10 @@ class WhisperTranscriptionClient:
 
             status = str(payload.get("status") or "").lower()
             if status in {"completed", "success", "succeeded", "done", "complete"}:
-                transcript_text = payload.get("transcript") or payload.get("text") or payload.get("result")
-                if not transcript_text or not isinstance(transcript_text, str):
-                    raise TranscriptionError("Whisper server completed without returning a transcript")
-                return transcript_text
+                try:
+                    return self._build_result(payload)
+                except ValueError as exc:
+                    raise TranscriptionError(str(exc)) from exc
 
             if status in {"failed", "error"}:
                 error_message = payload.get("error") or "Transcription failed"
@@ -96,3 +107,55 @@ class WhisperTranscriptionClient:
             time.sleep(self.poll_interval)
 
         raise TranscriptionError("Timed out waiting for Whisper transcription result")
+
+    def _build_result(self, payload: Dict[str, Any]) -> TranscriptionResult:
+        text = self._extract_transcript_text(payload)
+        if text is None:
+            raise ValueError("Whisper server completed without returning a transcript")
+        segments = self._extract_segments(payload)
+        vtt_content = self._extract_vtt(payload)
+        return TranscriptionResult(
+            text=text,
+            segments=segments,
+            vtt_content=vtt_content,
+            raw_payload=payload,
+        )
+
+    def _extract_transcript_text(self, payload: Dict[str, Any]) -> Optional[str]:
+        for field in ("transcript", "text"):
+            value = payload.get(field)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+
+        result_field = payload.get("result")
+        if isinstance(result_field, str) and result_field.strip():
+            return result_field.strip()
+        if isinstance(result_field, dict):
+            text_value = result_field.get("text")
+            if isinstance(text_value, str) and text_value.strip():
+                return text_value.strip()
+        return None
+
+    def _extract_segments(self, payload: Dict[str, Any]) -> Optional[list[dict[str, Any]]]:
+        candidates = []
+        if isinstance(payload.get("segments"), list):
+            candidates.append(payload["segments"])
+        result_field = payload.get("result")
+        if isinstance(result_field, dict) and isinstance(result_field.get("segments"), list):
+            candidates.append(result_field["segments"])
+        for candidate in candidates:
+            if candidate:
+                return candidate  # type: ignore[return-value]
+        return None
+
+    def _extract_vtt(self, payload: Dict[str, Any]) -> Optional[str]:
+        for field in ("vtt_content",):
+            value = payload.get(field)
+            if isinstance(value, str) and value.strip():
+                return value
+        result_field = payload.get("result")
+        if isinstance(result_field, dict):
+            value = result_field.get("vtt_content")
+            if isinstance(value, str) and value.strip():
+                return value
+        return None

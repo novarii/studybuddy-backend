@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import json
 import logging
 from typing import Optional
 from uuid import UUID, uuid4
@@ -21,7 +22,10 @@ from .downloaders.downloader import (
     DownloadError,
     PanoptoDownloader,
 )
-from .transcription_service import TranscriptionError, WhisperTranscriptionClient
+from .transcription_service import (
+    TranscriptionError,
+    WhisperTranscriptionClient,
+)
 from .users_service import ensure_user_exists
 
 logger = logging.getLogger(__name__)
@@ -167,15 +171,31 @@ class LecturesService:
 
             if self.transcriber is not None:
                 try:
-                    transcript_text = self.transcriber.transcribe(self.storage, audio_result.storage_key)
+                    transcription_result = self.transcriber.transcribe(self.storage, audio_result.storage_key)
                 except TranscriptionError as exc:
                     logger.warning("Transcription skipped for lecture %s: %s", lecture_id, exc)
                 else:
-                    transcript_storage_key = f"transcripts/{lecture.id}.txt"
-                    transcript_stream = io.BytesIO(transcript_text.encode("utf-8"))
-                    self.storage.store_file(transcript_storage_key, transcript_stream, mime_type="text/plain")
+                    transcript_storage_key = f"transcripts/{lecture.id}.json"
+                    transcript_stream = io.BytesIO(
+                        json.dumps(transcription_result.raw_payload).encode("utf-8")
+                    )
+                    self.storage.store_file(
+                        transcript_storage_key,
+                        transcript_stream,
+                        mime_type="application/json",
+                    )
                     temp_keys.append(transcript_storage_key)
                     lecture.transcript_storage_key = transcript_storage_key
+
+                    if transcription_result.vtt_content:
+                        vtt_storage_key = f"transcripts/{lecture.id}.vtt"
+                        vtt_stream = io.BytesIO(transcription_result.vtt_content.encode("utf-8"))
+                        self.storage.store_file(
+                            vtt_storage_key,
+                            vtt_stream,
+                            mime_type="text/vtt",
+                        )
+                        temp_keys.append(vtt_storage_key)
 
             lecture.status = LectureStatus.completed
             lecture.error_message = None
