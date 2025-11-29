@@ -184,17 +184,17 @@ class LecturesService:
             self.storage.delete_file(download_result.storage_key)
         except DownloadError as exc:
             logger.exception("Panopto download failed for lecture %s", lecture_id)
-            self._mark_failure(db, lecture_id, str(exc), temp_keys=temp_keys)
+            self._handle_pipeline_failure(db, lecture_id, str(exc), temp_keys=temp_keys)
         except AudioExtractionError as exc:
             logger.exception("Audio extraction failed for lecture %s", lecture_id)
-            self._mark_failure(db, lecture_id, str(exc), temp_keys=temp_keys)
+            self._handle_pipeline_failure(db, lecture_id, str(exc), temp_keys=temp_keys)
         except Exception as exc:  # pragma: no cover - defensive
             logger.exception("Audio pipeline failed for lecture %s", lecture_id)
-            self._mark_failure(db, lecture_id, str(exc), temp_keys=temp_keys)
+            self._handle_pipeline_failure(db, lecture_id, str(exc), temp_keys=temp_keys)
         finally:
             db.close()
 
-    def _mark_failure(
+    def _handle_pipeline_failure(
         self,
         db: Session,
         lecture_id: UUID,
@@ -204,10 +204,8 @@ class LecturesService:
         lecture = db.get(Lecture, lecture_id)
         if lecture is None:
             return
-        lecture.status = LectureStatus.failed
-        lecture.error_message = error_message[:1024]
-        lecture.audio_storage_key = None
-        lecture.transcript_storage_key = None
+        self._cleanup_lecture_assets(lecture)
+        db.delete(lecture)
         db.commit()
 
         if temp_keys:
