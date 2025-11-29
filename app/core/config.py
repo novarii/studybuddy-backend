@@ -8,6 +8,33 @@ from uuid import UUID
 
 from dotenv import load_dotenv
 
+
+def _optional_int_env(var_name: str) -> Optional[int]:
+    raw_value = os.getenv(var_name)
+    if raw_value is None:
+        return None
+    raw_value = raw_value.strip()
+    if not raw_value:
+        return None
+    try:
+        return int(raw_value)
+    except ValueError:
+        return None
+
+
+def _int_env(var_name: str, default: int) -> int:
+    raw_value = os.getenv(var_name)
+    if raw_value is None:
+        return default
+    raw_value = raw_value.strip()
+    if not raw_value:
+        return default
+    try:
+        return int(raw_value)
+    except ValueError:
+        return default
+
+
 # Resolve repo root so .env files remain discoverable after moving this module to app/core.
 _BASE_DIR = Path(__file__).resolve().parent.parent.parent
 for env_name in (".env.local", ".env"):
@@ -51,6 +78,11 @@ class Settings:
             if raw.strip()
         )
     )
+    whisper_server_ip: Optional[str] = os.getenv("WHISPER_SERVER_IP")
+    whisper_server_port: Optional[int] = _optional_int_env("WHISPER_SERVER_PORT")
+    whisper_request_timeout_seconds: int = _int_env("WHISPER_REQUEST_TIMEOUT_SECONDS", 30)
+    whisper_poll_interval_seconds: int = _int_env("WHISPER_POLL_INTERVAL_SECONDS", 5)
+    whisper_poll_timeout_seconds: int = _int_env("WHISPER_POLL_TIMEOUT_SECONDS", 600)
 
 
 settings = Settings()

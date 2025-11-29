@@ -5,4 +5,5 @@ __all__ = [
     "lectures_service",
     "users_service",
     "downloaders",
+    "transcription_service",
 ]

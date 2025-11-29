@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import logging
 from typing import Optional
 from uuid import UUID, uuid4
@@ -20,6 +21,7 @@ from .downloaders.downloader import (
     DownloadError,
     PanoptoDownloader,
 )
+from .transcription_service import TranscriptionError, WhisperTranscriptionClient
 from .users_service import ensure_user_exists
 
 logger = logging.getLogger(__name__)
@@ -33,10 +35,12 @@ class LecturesService:
         storage: StorageBackend,
         downloader: PanoptoDownloader,
         extractor: AudioExtractor,
+        transcriber: Optional[WhisperTranscriptionClient] = None,
     ) -> None:
         self.storage = storage
         self.downloader = downloader
         self.extractor = extractor
+        self.transcriber = transcriber
 
     def request_download(
         self,
@@ -160,6 +164,19 @@ class LecturesService:
             temp_keys.append(audio_result.storage_key)
             lecture.audio_storage_key = audio_result.storage_key
             lecture.duration_seconds = audio_result.duration_seconds
+
+            if self.transcriber is not None:
+                try:
+                    transcript_text = self.transcriber.transcribe(self.storage, audio_result.storage_key)
+                except TranscriptionError as exc:
+                    logger.warning("Transcription skipped for lecture %s: %s", lecture_id, exc)
+                else:
+                    transcript_storage_key = f"transcripts/{lecture.id}.txt"
+                    transcript_stream = io.BytesIO(transcript_text.encode("utf-8"))
+                    self.storage.store_file(transcript_storage_key, transcript_stream, mime_type="text/plain")
+                    temp_keys.append(transcript_storage_key)
+                    lecture.transcript_storage_key = transcript_storage_key
+
             lecture.status = LectureStatus.completed
             lecture.error_message = None
             db.commit()
@@ -190,6 +207,7 @@ class LecturesService:
         lecture.status = LectureStatus.failed
         lecture.error_message = error_message[:1024]
         lecture.audio_storage_key = None
+        lecture.transcript_storage_key = None
         db.commit()
 
         if temp_keys:

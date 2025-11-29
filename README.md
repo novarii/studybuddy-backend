@@ -15,6 +15,7 @@ FastAPI service providing Panopto lecture ingestion and PDF document uploads for
    - `DATABASE_URL` (default: `postgresql://postgres:postgres@localhost:5432/studybuddy`)
    - `STORAGE_ROOT` (default: `storage/` in the repo)
    - Optional overrides: `DOCUMENTS_STORAGE_PREFIX`, `AUDIO_TEMP_STORAGE_PREFIX`.
+   - `WHISPER_SERVER_IP` / `WHISPER_SERVER_PORT` so the lecture transcription pipeline can reach your Whisper FastAPI server (poll timing tunables available via `WHISPER_REQUEST_TIMEOUT_SECONDS`, `WHISPER_POLL_INTERVAL_SECONDS`, `WHISPER_POLL_TIMEOUT_SECONDS`).
    - `ffmpeg`/`ffprobe` binaries must be on `PATH` for audio extraction.
 
 3. **Run migrations**

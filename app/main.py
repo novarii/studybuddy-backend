@@ -37,6 +37,7 @@ from .services.documents_service import DocumentsService
 from .services.downloaders.downloader import FFmpegAudioExtractor
 from .services.downloaders.panopto_downloader import PanoptoPackageDownloader
 from .services.lectures_service import LecturesService
+from .services.transcription_service import WhisperTranscriptionClient
 from .storage import LocalStorageBackend
 
 app = FastAPI(title="StudyBuddy Backend")
@@ -51,10 +52,21 @@ app.add_middleware(
 )
 
 storage_backend = LocalStorageBackend(settings.storage_root)
+whisper_client = None
+if settings.whisper_server_ip:
+    whisper_port = settings.whisper_server_port or 80
+    whisper_base_url = f"http://{settings.whisper_server_ip}:{whisper_port}"
+    whisper_client = WhisperTranscriptionClient(
+        base_url=whisper_base_url,
+        request_timeout=settings.whisper_request_timeout_seconds,
+        poll_interval=settings.whisper_poll_interval_seconds,
+        poll_timeout=settings.whisper_poll_timeout_seconds,
+    )
 lectures_service = LecturesService(
     storage=storage_backend,
     downloader=PanoptoPackageDownloader(),
     extractor=FFmpegAudioExtractor(),
+    transcriber=whisper_client,
 )
 documents_service = DocumentsService(storage_backend)
 
