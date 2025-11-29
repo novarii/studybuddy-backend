@@ -8,11 +8,13 @@ This folder hosts all knowledge required to work on StudyBuddy Backend. Start he
 
 ## Tasks
 - `.agent/Tasks/` — Product requirements & implementation plans per feature (see file names for scope).
+  - [Tasks/pdf_vector_pipeline_plan.md](Tasks/pdf_vector_pipeline_plan.md) — Plan for hashing slides, AI descriptions, custom chunking, and embedding ingestion.
 
 ## SOPs
 - `.agent/SOP/` — Step-by-step guides for common workflows (add new entries as needed).
 
 ## Utilities
 - `scripts/run_migrations.sh` — Apply all SQL migrations sequentially (run after `docker compose up -d db`).
+- `scripts/test_transcription.py` — Manually upload a local `.m4a` file to the configured Whisper server to validate connectivity/polling.
 
 Keep this index updated whenever new documentation is added or reorganized.

@@ -17,7 +17,7 @@ Schema is provisioned by the SQL migrations under `migrations/versions/` (001–
 | stream_url | TEXT | Direct podcast URL used by the downloader. |
 | title | TEXT nullable | Optional metadata. |
 | audio_storage_key | TEXT nullable | Temp audio path `audio/{id}.m4a`. |
-| transcript_storage_key | TEXT nullable | Reserved for future transcripts `transcripts/{id}.json`. |
+| transcript_storage_key | TEXT nullable | Points to the stored Whisper payload (`transcripts/{id}.json`). |
 | duration_seconds | INT nullable | Extracted from audio via ffprobe. |
 | status | lecture_status | Defaults to `pending`; reflects download job state. |
 | error_message | TEXT nullable | Short failure reason (truncated in service). |
@@ -85,7 +85,7 @@ Minimal table to satisfy foreign keys and cascading cleanup (id + timestamps). R
 - Migration script conditionally creates a minimal `users` table (id + created_at) if absent so foreign keys succeed in local development.
 
 ## Data Lifecycles
-- **Lecture statuses**: transitions from `pending` → `downloading` → (`completed` | `failed`). `error_message` captures transient failures. Temporary storage keys are cleaned when `fail` occurs or when lecture is orphaned.
+- **Lecture statuses**: transitions from `pending` → `downloading` → (`completed` | `failed`). `error_message` captures transient failures. Temporary storage keys are cleaned when `fail` occurs or when lecture is orphaned. Successful runs store audio in `audio/{lecture_id}.m4a` and Whisper transcription payloads (JSON + optional `.vtt`) in `transcripts/{lecture_id}.json` (registered in `transcript_storage_key`).
 - **Document deduplication**: checksum uniqueness is scoped to the owner so each user controls their own uploads. Removing a document deletes the storage file immediately.
 
 ## Related Docs

@@ -1,46 +1,49 @@
 # Project Architecture
 
 ## Overview
-StudyBuddy Backend is a FastAPI service that orchestrates Panopto lecture audio downloads and PDF document uploads for AI-powered study workflows. PostgreSQL stores all metadata, while files live behind a swappable storage abstraction (local disk currently). Route handlers in `app/main.py` stay thin by delegating to domain services.
+StudyBuddy Backend is a FastAPI service that orchestrates Panopto lecture audio downloads, transcription, and PDF document uploads for AI-powered study workflows. PostgreSQL stores all metadata, while binary assets live behind a swappable storage abstraction (local disk currently). Route handlers in `app/main.py` stay thin by delegating to service modules.
 
 ## Tech Stack
-- **API**: FastAPI (`app/main.py`) with Pydantic schemas in `app/schemas.py`.
-- **Auth**: Clerk session tokens are verified in `app/auth.py`; every route depends on `require_user` to resolve the signed-in UUID.
-- **Database**: PostgreSQL accessed through SQLAlchemy ORM (`app/db.py`, `app/models.py`).
-- **Storage abstraction**: `app/storage.py` exposes `StorageBackend` and `LocalStorageBackend` for filesystem persistence.
-- **Panopto pipeline**: `app/downloader.py` defines the storage/audio interfaces and `app/panopto_downloader.py` supplies the production downloader powered by the external `PanoptoDownloader` package, drastically improving reliability over raw HTTP fetches.
-- **Services**: `app/lectures_service.py` and `app/documents_service.py` handle business logic, deduplication, and orchestration.
-- **Config**: `app/config.py` centralizes environment-driven settings (database URL, storage roots/prefixes).
+- **API**: FastAPI (`app/main.py`) with dependencies/helpers in `app/api/` and Pydantic schemas in `app/schemas/`.
+- **Auth**: Clerk session tokens are verified in `app/api/auth.py`; every route depends on `require_user` to resolve the signed-in UUID.
+- **Database**: PostgreSQL accessed through SQLAlchemy ORM (`app/database/db.py`, `app/database/models.py`).
+- **Storage abstraction**: `app/storage/__init__.py` exposes `StorageBackend` and `LocalStorageBackend` for filesystem persistence (default root `storage/`).
+- **Download/transcription pipeline**: `app/services/downloaders/downloader.py` defines downloader/extractor interfaces, `app/services/downloaders/panopto_downloader.py` wraps the PanoptoDownloader package, and `app/services/transcription_service.py` integrates with a remote Whisper FastAPI server.
+- **Services**: `app/services/lectures_service.py`, `app/services/documents_service.py`, and `app/services/users_service.py` handle business logic, deduplication, orchestration, and cleanup.
+- **Config**: `app/core/config.py` centralizes environment-driven settings (database URL, storage roots/prefixes, Clerk, Whisper server, etc.).
 - **Migrations**: SQL files under `migrations/versions/` contain schema setup. `scripts/run_migrations.sh` pipes them into the Dockerized Postgres instance in order for quick resets.
 
 ## Project Structure
 ```
 app/
-  config.py          # Settings dataclass (DB URL, storage roots)
-  db.py              # SQLAlchemy engine/session + Base
-  models.py          # ORM models & enums for lectures/documents/link tables
-  schemas.py         # Pydantic request/response models
-  storage.py         # StorageBackend interface + local implementation
-  downloader.py      # Storage + FFmpeg audio extractor interfaces
-  panopto_downloader.py # Adapter around PanoptoDownloader PyPI package
-  lectures_service.py# Lecture ingestion, background pipeline, cleanup
-  documents_service.py# PDF upload + dedup + user linking
-  utils.py           # Helpers (e.g., Panopto session ID extraction)
-  main.py            # FastAPI app + routes
-migrations/versions/001_initial.sql # Schema, enums, triggers
-storage/             # Local asset roots (documents/, audio_tmp/)
+  api/                        # Auth helpers and future API-specific utilities
+  core/                       # Settings + shared utilities
+  database/                   # SQLAlchemy session + models
+  schemas/                    # Pydantic request/response models
+  services/
+    documents_service.py      # PDF upload + dedup + user linking
+    lectures_service.py       # Lecture ingestion, Panopto + Whisper pipelines
+    users_service.py          # Lazy user row creation
+    downloaders/              # Download + extraction interfaces/adapters
+    transcription_service.py  # Whisper transcription client/result structs
+  storage/                    # StorageBackend interface + local implementation
+  main.py                     # FastAPI app + routes
+migrations/                   # SQL schema migrations
+scripts/                      # Operational helpers (migrations, transcription tests)
+storage/                      # Local asset roots (documents/, audio_tmp/, transcripts/)
 ```
 
 ## Core Flows
-### Lecture Download
+### Lecture Download & Transcription
 1. Client POSTs to `/api/lectures/download` with `course_id`, `panopto_url` (viewer link), `stream_url` (direct podcast URL), optional `title` (`app/main.py`).
 2. `LecturesService.request_download(...)` checks `(course_id, panopto_session_id)` for duplicates, links the user, and enqueues `_run_download_pipeline` via FastAPI `BackgroundTasks`.
 3. Pipeline (`app/lectures_service.py`):
    - Marks lecture as `downloading`.
    - Uses `PanoptoPackageDownloader` to stream the direct podcast URL into temporary storage key `audio_tmp/{lecture_id}_source.mp4` via `StorageBackend`.
    - Converts to audio with `FFmpegAudioExtractor`, writing `audio/{lecture_id}.m4a` via storage.
-   - Updates `duration_seconds`, keeps audio key for later transcription, deletes temporary video file, and marks status `completed`.
-   - On failure, sets `status='failed'`, stores `error_message`, and cleans up temp keys.
+   - If Whisper configuration is present, `WhisperTranscriptionClient` uploads the audio to the remote FastAPI server (`/transcribe`), polls `/result/{task_id}`, and returns structured text + segments + VTT metadata. The full payload is stored at `transcripts/{lecture_id}.json` (and `transcripts/{lecture_id}.vtt` when provided).
+   - Updates `duration_seconds`, keeps audio/transcript keys, deletes temporary video file, and marks status `completed`.
+   - Failures delete the lecture row entirely and remove any stored assets to avoid stale data.
 4. Metadata is accessible via `GET /api/lectures/{id}` and `GET /api/lectures/{id}/status`, which verify user linkage.
 
 ### Document Upload
@@ -59,13 +62,16 @@ Deleting a document removes both the metadata row and the physical file because 
 ## Background Tasks & External Dependencies
 - **Panopto downloads**: `requests` library pulls video bytes over HTTP. Actual Panopto auth/tokenization must be supplied by upstream callers.
 - **Audio extraction**: `ffmpeg`/`ffprobe` binaries must be available on the host; extractor falls back to copying the video file if `ffmpeg` is missing (still flagged as success but without transcoding guarantees).
-- **Storage migration**: All stored paths use logical `storage_key` strings (`audio/...`, `documents/...`) so swapping `LocalStorageBackend` for S3/Spaces only requires implementing `StorageBackend`.
+- **Whisper transcription**: `WHISPER_SERVER_IP` and `WHISPER_SERVER_PORT` must point to the remote Whisper FastAPI server reachable over the network. Timeouts/poll intervals are tunable via `WHISPER_*` env vars. `scripts/test_transcription.py` can push a local audio file through the same client for quick diagnostics.
+- **Storage migration**: All stored paths use logical `storage_key` strings (`documents/...`, `audio/...`, `transcripts/...`) so swapping `LocalStorageBackend` for S3/Spaces only requires implementing `StorageBackend`.
 
 ## Configuration & Environment
 - `DATABASE_URL` (default `postgresql://postgres:postgres@localhost:5432/studybuddy`)
 - `STORAGE_ROOT` (default `storage/` inside repo)
 - `DOCUMENTS_STORAGE_PREFIX`, `AUDIO_TEMP_STORAGE_PREFIX` (override folder names if needed)
-- Ensure directories `storage/documents/` and `storage/audio_tmp/` exist and are writable.
+- `CLERK_SECRET_KEY`, `CLERK_AUTHORIZED_PARTIES` (auth)
+- `WHISPER_SERVER_IP`, `WHISPER_SERVER_PORT`, `WHISPER_REQUEST_TIMEOUT_SECONDS`, `WHISPER_POLL_INTERVAL_SECONDS`, `WHISPER_POLL_TIMEOUT_SECONDS` (remote transcription client)
+- Ensure directories `storage/documents/`, `storage/audio_tmp/`, and `storage/transcripts/` are writable (they are created lazily as needed).
 
 ## API Surface
 | Method | Path | Description |
