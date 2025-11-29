@@ -62,14 +62,15 @@ class SlideContentWithNumber(BaseModel):
     def as_chunk(self) -> str:
         """Concatenate the structured fields into a single chunk suitable for embeddings."""
 
-        return "\n".join(
-            [
-                f"Slide {self.slide_number} ({self.slide_type.value}):",
-                f"Text: {self.text_content}",
-                f"Images: {self.images_description}",
-                f"Diagrams/Figures: {self.diagrams_and_figures_description}",
-            ]
-        )
+        def normalize(value: str) -> str:
+            return " ".join(value.split())
+
+        parts = [
+            f"Text: {normalize(self.text_content)}",
+            f"Images: {normalize(self.images_description)}",
+            f"Diagrams/Figures: {normalize(self.diagrams_and_figures_description)}",
+        ]
+        return " | ".join(parts)
 
 
 class SlideDescriptionAgent:
@@ -120,16 +121,38 @@ class SlideDescriptionAgent:
         if isinstance(content, SlideContent):
             return content
         if isinstance(content, dict):
-            return SlideContent(**content)
+            return SlideContent(**self._normalize_fields(content))
         if hasattr(response, "output") and isinstance(response.output, dict):
-            return SlideContent(**response.output)
+            return SlideContent(**self._normalize_fields(response.output))
         # Fallback: treat whole response as text_content.
         return SlideContent(
-            text_content=str(content or response),
-            images_description="Not present",
-            diagrams_and_figures_description="Not present",
+            text_content=self._default_text(content),
+            images_description="None",
+            diagrams_and_figures_description="None",
             slide_type=SlideType.content,
         )
+
+    def _normalize_fields(self, raw: dict) -> dict:
+        normalized = dict(raw)
+        normalized["images_description"] = self._normalize_optional_field(
+            normalized.get("images_description")
+        )
+        normalized["diagrams_and_figures_description"] = self._normalize_optional_field(
+            normalized.get("diagrams_and_figures_description")
+        )
+        normalized["text_content"] = self._normalize_optional_field(normalized.get("text_content"))
+        return normalized
+
+    def _normalize_optional_field(self, value) -> str:
+        if value is None:
+            return "None"
+        value_str = str(value).strip()
+        return value_str if value_str else "None"
+
+    def _default_text(self, value) -> str:
+        if value is None:
+            return "None"
+        return str(value)
 
     def _build_prompt(self, slide_number: int) -> str:
         return (
