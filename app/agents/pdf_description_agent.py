@@ -16,7 +16,7 @@ INSTRUCTIONS = """
 You are an expert at analyzing presentation slides. For each slide image provided,
 produce a structured JSON description that matches the SlideContent schema.
 Focus strictly on the information visible in the slide and avoid hallucinating unseen details.
-If a particular category (text, images, diagrams) is not present, return a short phrase such as "None" or "Not present".
+If a particular category (text, images, diagrams) is not present, return "None".
 Classify the slide type as "title" if it primarily shows the lecture title/section heading; otherwise classify it as "content".
 """
 

@@ -1,0 +1,144 @@
+from __future__ import annotations
+
+import logging
+from typing import Any, Callable, Dict, List, Optional, Sequence, Union
+from uuid import UUID
+
+from agno.agent import Agent
+from agno.filters import FilterExpr
+from agno.knowledge import Knowledge
+from agno.knowledge.document import Document
+from agno.models.xai import xAI
+
+from .knowledge_builder import get_lecture_knowledge, get_slide_knowledge
+
+logger = logging.getLogger(__name__)
+
+KnowledgeFactory = Callable[[], Optional[Knowledge]]
+FilterType = Union[Dict[str, Any], Sequence[FilterExpr], None]
+
+DEFAULT_INSTRUCTIONS = """
+You are StudyBuddy's course companion. Answer questions using the student's
+lecture transcripts and slide decks. When the question references class materials, search
+the knowledge base before responding and cite the relevant lecture chunk or slide.
+""".strip()
+
+
+def _build_filter_dict(
+    filters: FilterType,
+    *,
+    user_id: Union[str, UUID, None] = None,
+    course_id: Union[str, UUID, None] = None,
+    document_id: Union[str, UUID, None] = None,
+    lecture_id: Union[str, UUID, None] = None,
+) -> FilterType:
+    """Merge caller provided filters with context derived identifiers."""
+
+    extra_filters: Dict[str, str] = {}
+    if user_id:
+        extra_filters["owner_id"] = _stringify(user_id)
+    if course_id:
+        extra_filters["course_id"] = _stringify(course_id)
+    if document_id:
+        extra_filters["document_id"] = _stringify(document_id)
+    if lecture_id:
+        extra_filters["lecture_id"] = _stringify(lecture_id)
+
+    if not extra_filters:
+        return filters
+
+    if filters is None:
+        return extra_filters
+
+    if isinstance(filters, dict):
+        merged = dict(filters)
+        merged.update(extra_filters)
+        return merged
+
+    # Filter expressions are already validated elsewhere; leave untouched.
+    return filters
+
+
+def _stringify(value: Union[str, UUID]) -> str:
+    return str(value)
+
+
+def _search_knowledge(
+    factory: KnowledgeFactory,
+    query: str,
+    *,
+    max_results: int,
+    filters: FilterType,
+) -> List[Document]:
+    knowledge = factory()
+    if knowledge is None:
+        logger.debug("Knowledge factory %s returned None; skipping search", factory.__name__)
+        return []
+
+    try:
+        results = knowledge.search(query=query, max_results=max_results, filters=filters) or []
+        logger.debug("Retrieved %s documents from %s", len(results), factory.__name__)
+        return list(results)
+    except Exception:
+        logger.exception("Knowledge search failed for %s", factory.__name__)
+        return []
+
+
+def custom_retriever(
+    agent: Agent,
+    query: str,
+    num_documents: int = 5,
+    *,
+    filters: FilterType = None,
+    user_id: Union[str, UUID, None] = None,
+    course_id: Union[str, UUID, None] = None,
+    document_id: Union[str, UUID, None] = None,
+    lecture_id: Union[str, UUID, None] = None,
+    **kwargs: Any,
+) -> Optional[List[Document]]:
+    """
+    Custom retriever that queries slide knowledge first and lecture knowledge second.
+
+    The caller can optionally provide course/user identifiers which we merge into
+    the metadata filters so the vector search only touches documents the user owns.
+    """
+
+    effective_filters = _build_filter_dict(
+        filters,
+        user_id=user_id or agent.user_id,
+        course_id=course_id,
+        document_id=document_id,
+        lecture_id=lecture_id,
+    )
+
+    slide_docs = _search_knowledge(
+        get_slide_knowledge,
+        query,
+        max_results=num_documents,
+        filters=effective_filters,
+    )
+    lecture_docs = _search_knowledge(
+        get_lecture_knowledge,
+        query,
+        max_results=num_documents,
+        filters=effective_filters,
+    )
+
+    combined = slide_docs + lecture_docs
+    return combined or None
+
+
+def create_chat_agent(*, instructions: Optional[str] = None) -> Agent:
+    """Instantiate the Grok-powered StudyBuddy chat agent with custom retrieval."""
+
+    return Agent(
+        name="StudyBuddyChatAgent",
+        model=xAI(id="grok-4.1-fast"),
+        instructions=instructions or DEFAULT_INSTRUCTIONS,
+        knowledge_retriever=custom_retriever,
+        search_knowledge=True,
+        markdown=True,
+    )
+
+
+__all__ = ["create_chat_agent", "custom_retriever"]

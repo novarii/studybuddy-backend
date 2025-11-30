@@ -18,6 +18,8 @@ dependencies = [
     "sqlalchemy>=2.0.35,<3.0.0",
     "uvicorn>=0.34.0,<1.0.0",
     "google-genai>=1.52.0",
+    "xai>=0.3.0",
+    "openai>=2.8.1",
 ]
 
 [tool.uv.sources]
