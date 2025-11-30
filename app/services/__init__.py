@@ -5,6 +5,8 @@ __all__ = [
     "lectures_service",
     "users_service",
     "downloaders",
+    "document_chunk_pipeline",
+    "pdf_slide_chunks_service",
     "pdf_slides_service",
     "transcription_service",
 ]

@@ -33,6 +33,7 @@ from .schemas import (
     LectureStatusListItem,
     LectureStatusResponse,
 )
+from .services.document_chunk_pipeline import DocumentChunkPipeline
 from .services.documents_service import DocumentsService
 from .services.downloaders.downloader import FFmpegAudioExtractor
 from .services.downloaders.panopto_downloader import PanoptoPackageDownloader
@@ -69,6 +70,7 @@ lectures_service = LecturesService(
     transcriber=whisper_client,
 )
 documents_service = DocumentsService(storage_backend)
+document_chunk_pipeline = DocumentChunkPipeline(storage_backend)
 
 @app.get("/api/health")
 async def health_check():
@@ -201,6 +203,7 @@ async def delete_lecture(
 @app.post("/api/documents/upload", response_model=DocumentUploadResponse)
 async def upload_document(
     response: Response,
+    background_tasks: BackgroundTasks,
     course_id: UUID = Form(...),
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
@@ -221,6 +224,12 @@ async def upload_document(
         content_type=file.content_type,
         file_bytes=file_bytes,
     )
+    if created:
+        background_tasks.add_task(
+            document_chunk_pipeline.process_document,
+            document.id,
+            document.storage_key,
+        )
     response.status_code = status.HTTP_201_CREATED if created else status.HTTP_200_OK
     return DocumentUploadResponse(
         document_id=document.id,

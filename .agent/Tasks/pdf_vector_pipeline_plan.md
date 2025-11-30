@@ -17,16 +17,21 @@ Ingest PDF lecture slides into a vector store with minimal yet high-signal text 
      - Wrap the AI output in `SlideContentWithNumber` after inference to attach the original slide number (the agent itself fills only `SlideContent`, we add the number post-processing).
    - We combine subfields into a single chunk string per slide (including the slide number and type) before ingestion.
    - The agent will run via the Agno framework (details pending), but the schema + file location are fixed.
-4. **Custom chunking**: run the generated text through our custom chunking logic to split descriptions into semantically coherent pieces sized for embeddings.
-5. **Embedding + filtering**: compute embeddings for each chunk, then remove chunks with high cosine similarity so the final vector table only stores distinct, high-information entries.
-6. **Persist** the curated chunks + embeddings into the vector table for later semantic search on slides.
+4. **Custom chunking/reader integration**: plug our bespoke chunking logic into Agno by either
+   - implementing a `ChunkingStrategy` subclass (docs’ `CustomChunking`) and wrapping our slides in a custom reader, or
+   - writing a custom reader that emits `Document` objects built from our slide descriptions (text + metadata) so Agno’s Knowledge system can feed them into the chunking strategy we need.
+5. **Embedding + filtering**:
+   - Compute embeddings for each chunk.
+   - Remove chunks with high cosine similarity so the final vector table only stores distinct, high-information entries.
+6. **Persist** the curated chunks + embeddings into a PgVector-backed table and link the resulting rows to an Agno `Knowledge` object so agents can run semantic search against lecture slides. Each `knowledge.add_content` call must include metadata for filtering (at minimum `owner_id` and `course_id` so we can scope results to the user’s uploads/course). Agno’s `Knowledge(vector_db=PgVector(...))` wiring supports both synchronous and async ingestion, and we can pass a custom reader/chunking strategy when calling `add_content`/`add_content_async`.
 
 ## Next Steps
 Please provide details about:
 - Agno agent configuration and prompts for slide understanding (model, context windows, system instructions).
 - Exact `SlideContent` + `SlideType` schema requirements (validation rules, default handling) and how `SlideContentWithNumber` should be serialized.
-- Custom chunking logic specifics.
-- Embedding model + vector DB schema, including cosine similarity thresholds for deduplication.
+- We bypass readers entirely and push `Document`s straight into the vector DB via repeated `knowledge.add_content(text_content=chunk, metadata={"owner_id": ..., "course_id": ...})` calls?
+- Embedding model + vector DB schema, including cosine similarity thresholds for deduplication. (We plan to use Voyage 3-lite for embeddings—need to confirm whether Agno already ships a Voyage embedder or if we should implement a custom embedder wrapper.)
+- PgVector schema details for the slide embeddings table (columns for chunk text, embedding vector, metadata references) and whether we should use Agno’s built-in `Knowledge` + `PgVector` integration (see Agno docs on `Knowledge(vector_db=PgVector(...))`) or manage ingestion manually.
 
 ## Related Docs
 - [System/project_architecture.md](../System/project_architecture.md)

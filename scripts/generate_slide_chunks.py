@@ -12,6 +12,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.agents.pdf_description_agent import SlideDescriptionAgent
+from app.services.pdf_slide_chunks_service import SlideChunkingService
 from app.services.pdf_slides_service import (
     InMemorySlideHashRepository,
     SlideExtractionService,
@@ -41,21 +42,21 @@ def main() -> int:
     hash_repo = InMemorySlideHashRepository()
     extractor = SlideExtractionService(storage, hash_repo)
     agent = SlideDescriptionAgent()
+    chunk_service = SlideChunkingService(extractor, agent)
 
     document_id = uuid.uuid4()
-    slides = extractor.extract_unique_slides(document_id, pdf_path.name)
-    if not slides:
+    result = chunk_service.generate_chunks(document_id, pdf_path.name)
+    if not result.chunks:
         print("No unique slides found.")
         return 0
 
-    descriptions = agent.describe_slides(slides)
-    chunks = [desc.as_chunk() for desc in descriptions]
+    chunks = result.chunk_texts()
 
     output_path = args.output.resolve()
     with output_path.open("w", encoding="utf-8") as f:
         json.dump(chunks, f, indent=2, ensure_ascii=False)
 
-    print(f"Processed {len(descriptions)} slides. Chunks written to {output_path}")
+    print(f"Processed {len(result.chunks)} slides. Chunks written to {output_path}")
     return 0
 
 
