@@ -24,25 +24,8 @@ the knowledge base before responding and cite the relevant lecture chunk or slid
 """.strip()
 
 
-def _build_filter_dict(
-    filters: FilterType,
-    *,
-    user_id: Union[str, UUID, None] = None,
-    course_id: Union[str, UUID, None] = None,
-    document_id: Union[str, UUID, None] = None,
-    lecture_id: Union[str, UUID, None] = None,
-) -> FilterType:
+def _merge_filters(filters: FilterType, extra_filters: Optional[Dict[str, str]]) -> FilterType:
     """Merge caller provided filters with context derived identifiers."""
-
-    extra_filters: Dict[str, str] = {}
-    if user_id:
-        extra_filters["owner_id"] = _stringify(user_id)
-    if course_id:
-        extra_filters["course_id"] = _stringify(course_id)
-    if document_id:
-        extra_filters["document_id"] = _stringify(document_id)
-    if lecture_id:
-        extra_filters["lecture_id"] = _stringify(lecture_id)
 
     if not extra_filters:
         return filters
@@ -56,6 +39,14 @@ def _build_filter_dict(
         return merged
 
     # Filter expressions are already validated elsewhere; leave untouched.
+    return filters
+
+
+def _strip_dict_key(filters: FilterType, key: str) -> FilterType:
+    if isinstance(filters, dict) and key in filters:
+        cleaned = dict(filters)
+        cleaned.pop(key, None)
+        return cleaned
     return filters
 
 
@@ -90,7 +81,7 @@ def custom_retriever(
     num_documents: int = 5,
     *,
     filters: FilterType = None,
-    user_id: Union[str, UUID, None] = None,
+    owner_id: Union[str, UUID, None] = None,
     course_id: Union[str, UUID, None] = None,
     document_id: Union[str, UUID, None] = None,
     lecture_id: Union[str, UUID, None] = None,
@@ -99,29 +90,42 @@ def custom_retriever(
     """
     Custom retriever that queries slide knowledge first and lecture knowledge second.
 
-    The caller can optionally provide course/user identifiers which we merge into
+    The caller can optionally provide course/owner identifiers which we merge into
     the metadata filters so the vector search only touches documents the user owns.
     """
 
-    effective_filters = _build_filter_dict(
-        filters,
-        user_id=user_id or agent.user_id,
-        course_id=course_id,
-        document_id=document_id,
-        lecture_id=lecture_id,
-    )
+    slide_extra = {
+        key: value
+        for key, value in {
+            "owner_id": _stringify(owner_id or agent.user_id) if (owner_id or agent.user_id) else None,
+            "course_id": _stringify(course_id) if course_id else None,
+            "document_id": _stringify(document_id) if document_id else None,
+        }.items()
+        if value is not None
+    }
+    lecture_extra = {
+        key: value
+        for key, value in {
+            "course_id": _stringify(course_id) if course_id else None,
+            "lecture_id": _stringify(lecture_id) if lecture_id else None,
+        }.items()
+        if value is not None
+    }
+
+    slide_filters = _merge_filters(filters, slide_extra)
+    lecture_filters = _merge_filters(_strip_dict_key(filters, "owner_id"), lecture_extra)
 
     slide_docs = _search_knowledge(
         get_slide_knowledge,
         query,
         max_results=num_documents,
-        filters=effective_filters,
+        filters=slide_filters,
     )
     lecture_docs = _search_knowledge(
         get_lecture_knowledge,
         query,
         max_results=num_documents,
-        filters=effective_filters,
+        filters=lecture_filters,
     )
 
     combined = slide_docs + lecture_docs
