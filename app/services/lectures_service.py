@@ -22,10 +22,8 @@ from .downloaders.downloader import (
     DownloadError,
     PanoptoDownloader,
 )
-from .transcription_service import (
-    TranscriptionError,
-    WhisperTranscriptionClient,
-)
+from .lecture_chunk_pipeline import LectureChunkPipeline
+from .transcription_service import TranscriptionError, WhisperTranscriptionClient
 from .users_service import ensure_user_exists
 
 logger = logging.getLogger(__name__)
@@ -40,11 +38,13 @@ class LecturesService:
         downloader: PanoptoDownloader,
         extractor: AudioExtractor,
         transcriber: Optional[WhisperTranscriptionClient] = None,
+        lecture_chunk_pipeline: Optional[LectureChunkPipeline] = None,
     ) -> None:
         self.storage = storage
         self.downloader = downloader
         self.extractor = extractor
         self.transcriber = transcriber
+        self.lecture_chunk_pipeline = lecture_chunk_pipeline
 
     def request_download(
         self,
@@ -119,6 +119,8 @@ class LecturesService:
             return
         db.delete(link)
         db.flush()
+        if self.lecture_chunk_pipeline is not None:
+            self.lecture_chunk_pipeline.remove_user_chunks(lecture_id, user_id)
 
         remaining = (
             db.execute(
@@ -149,6 +151,7 @@ class LecturesService:
             lecture = db.get(Lecture, lecture_id)
             if lecture is None:
                 return
+            user_ids = self._fetch_lecture_user_ids(db, lecture_id)
 
             lecture.status = LectureStatus.downloading
             lecture.error_message = None
@@ -196,6 +199,17 @@ class LecturesService:
                             mime_type="text/vtt",
                         )
                         temp_keys.append(vtt_storage_key)
+
+                    if self.lecture_chunk_pipeline is not None:
+                        try:
+                            self.lecture_chunk_pipeline.process_transcript_segments(
+                                lecture_id=lecture.id,
+                                course_id=lecture.course_id,
+                                user_ids=user_ids,
+                                segments=transcription_result.segments,
+                            )
+                        except Exception:  # pragma: no cover - background safety
+                            logger.exception("Lecture chunk pipeline failed for lecture %s", lecture_id)
 
             lecture.status = LectureStatus.completed
             lecture.error_message = None
@@ -251,3 +265,9 @@ class LecturesService:
             self.storage.delete_file(lecture.audio_storage_key)
         if lecture.transcript_storage_key:
             self.storage.delete_file(lecture.transcript_storage_key)
+        if self.lecture_chunk_pipeline is not None:
+            self.lecture_chunk_pipeline.cleanup_lecture(lecture.id)
+
+    def _fetch_lecture_user_ids(self, db: Session, lecture_id: UUID) -> list[UUID]:
+        stmt = select(UserLecture.user_id).where(UserLecture.lecture_id == lecture_id)
+        return list(db.execute(stmt).scalars().all())

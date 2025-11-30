@@ -44,6 +44,7 @@ PgVector is provided by running the `pgvector/pgvector:pg16` Docker image (see `
 - **Reprocessing**: If you need to rebuild knowledge after a config change, delete the JSON artifact and vector rows, then re-run `process_document` manually (e.g., via a management command or shell script).
 
 ## Related Docs
+- [Lecture Chunk & Knowledge Pipeline](lecture_chunk_pipeline.md)
 - [Project Architecture](project_architecture.md)
 - [Database Schema](database_schema.md)
 - [Task: PDF Vector Pipeline Plan](../Tasks/pdf_vector_pipeline_plan.md)

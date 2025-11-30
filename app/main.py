@@ -37,6 +37,7 @@ from .services.document_chunk_pipeline import DocumentChunkPipeline
 from .services.documents_service import DocumentsService
 from .services.downloaders.downloader import FFmpegAudioExtractor
 from .services.downloaders.panopto_downloader import PanoptoPackageDownloader
+from .services.lecture_chunk_pipeline import LectureChunkPipeline
 from .services.lectures_service import LecturesService
 from .services.transcription_service import WhisperTranscriptionClient
 from .storage import LocalStorageBackend
@@ -53,6 +54,7 @@ app.add_middleware(
 )
 
 storage_backend = LocalStorageBackend(settings.storage_root)
+lecture_chunk_pipeline = LectureChunkPipeline(storage_backend)
 whisper_client = None
 if settings.whisper_server_ip:
     whisper_port = settings.whisper_server_port or 80
@@ -68,6 +70,7 @@ lectures_service = LecturesService(
     downloader=PanoptoPackageDownloader(),
     extractor=FFmpegAudioExtractor(),
     transcriber=whisper_client,
+    lecture_chunk_pipeline=lecture_chunk_pipeline,
 )
 documents_service = DocumentsService(storage_backend)
 document_chunk_pipeline = DocumentChunkPipeline(storage_backend)
