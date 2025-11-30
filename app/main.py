@@ -299,4 +299,5 @@ async def delete_document(
     else:
         documents_service.fetch_document_for_user(db, document_id, current_user.user_id)
         documents_service.remove_user_from_document(db, document_id, current_user.user_id)
+    document_chunk_pipeline.cleanup_document(document_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

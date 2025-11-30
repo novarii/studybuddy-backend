@@ -33,6 +33,15 @@ class DocumentChunkPipeline:
         self.chunk_storage_prefix = chunk_storage_prefix
         self._knowledge_factory = knowledge_factory or get_slide_knowledge
 
+    def cleanup_document(self, document_id: UUID) -> None:
+        """Remove stored chunk artifacts and vector rows related to a document."""
+
+        try:
+            self.storage.delete_file(self._chunk_storage_key(document_id))
+        except FileNotFoundError:
+            pass
+        self._remove_from_knowledge(document_id)
+
     def process_document(
         self,
         document_id: UUID,
@@ -126,3 +135,15 @@ class DocumentChunkPipeline:
                     chunk.slide_number,
                     document_id,
                 )
+
+    def _remove_from_knowledge(self, document_id: UUID) -> None:
+        if self._knowledge_factory is None:
+            return
+        knowledge = self._knowledge_factory()
+        if knowledge is None:
+            return
+
+        try:
+            knowledge.remove_vectors_by_metadata({"document_id": str(document_id)})
+        except Exception:  # pragma: no cover - defensive
+            logger.exception("Failed to remove knowledge vectors for document %s", document_id)
