@@ -5,6 +5,7 @@ This folder hosts all knowledge required to work on StudyBuddy Backend. Start he
 ## System Docs
 - [System/project_architecture.md](System/project_architecture.md) — Overall project goal, architecture, tech stack, API surface, and core flows.
 - [System/database_schema.md](System/database_schema.md) — Detailed PostgreSQL schema, enums, constraints, and lifecycle notes.
+- [System/slide_chunk_pipeline.md](System/slide_chunk_pipeline.md) — Implementation details for the slide extraction, AI chunking, and PgVector knowledge ingestion pipeline.
 
 ## Tasks
 - `.agent/Tasks/` — Product requirements & implementation plans per feature (see file names for scope).

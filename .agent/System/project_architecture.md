@@ -50,10 +50,12 @@ storage/                      # Local asset roots (documents/, audio_tmp/, trans
 1. Client POSTs `/api/documents/upload` with multipart PDF `file`, `course_id`, `user_id` (`app/main.py`).
 2. Handler enforces PDF MIME/extension and reads bytes.
 3. `DocumentsService.upload_document(...)` computes SHA256 checksum, ensures the owning user exists, checks for duplicates scoped to that user & course, writes bytes to `documents/{document_id}.pdf`, and stores metadata with `owner_id`.
-4. `GET /api/documents/{id}` returns metadata while hiding storage paths/checksums.
-5. `GET /api/documents/{id}/file` streams the stored PDF, still verifying user association.
+4. When a new document is created, FastAPI schedules `DocumentChunkPipeline.process_document(...)` as a background task. The pipeline renders/deduplicates slides, runs the Gemini description agent, writes a JSON artifact under `storage/document_chunks/{document_id}.json`, and calls `Knowledge.add_content` for each chunk so PgVector tables stay in sync. Missing Voyage credentials cause ingestion to be skipped but do not fail the upload.
+5. `GET /api/documents/{id}` returns metadata while hiding storage paths/checksums.
+6. `GET /api/documents/{id}/file` streams the stored PDF, still verifying user association.
 
 Deleting a document removes both the metadata row and the physical file because each record now belongs to exactly one user.
+The delete endpoint now also calls `DocumentChunkPipeline.cleanup_document(...)` so the stored chunk JSON and related PgVector rows (`slide_chunks_knowledge`) are purged.
 
 ### User Linking & Cleanup
 - Lecture access remains in `user_lectures`; deleting the final link destroys the lecture and attached audio assets.
@@ -71,6 +73,8 @@ Deleting a document removes both the metadata row and the physical file because 
 - `DOCUMENTS_STORAGE_PREFIX`, `AUDIO_TEMP_STORAGE_PREFIX` (override folder names if needed)
 - `CLERK_SECRET_KEY`, `CLERK_AUTHORIZED_PARTIES` (auth)
 - `WHISPER_SERVER_IP`, `WHISPER_SERVER_PORT`, `WHISPER_REQUEST_TIMEOUT_SECONDS`, `WHISPER_POLL_INTERVAL_SECONDS`, `WHISPER_POLL_TIMEOUT_SECONDS` (remote transcription client)
+- `VOYAGE_API_KEY`, `VOYAGE_MODEL_ID`, `VOYAGE_EMBED_DIMENSIONS` (Voyage embedder used by Agno Knowledge).
+- `KNOWLEDGE_VECTOR_SCHEMA`, `SLIDE_KNOWLEDGE_TABLE`, `LECTURE_KNOWLEDGE_TABLE` (PgVector schema/table settings for slide/lecture knowledge stores).
 - Ensure directories `storage/documents/`, `storage/audio_tmp/`, and `storage/transcripts/` are writable (they are created lazily as needed).
 
 ## API Surface
