@@ -83,6 +83,12 @@ class Settings:
     whisper_request_timeout_seconds: int = _int_env("WHISPER_REQUEST_TIMEOUT_SECONDS", 180)
     whisper_poll_interval_seconds: int = _int_env("WHISPER_POLL_INTERVAL_SECONDS", 5)
     whisper_poll_timeout_seconds: int = _int_env("WHISPER_POLL_TIMEOUT_SECONDS", 600)
+    voyage_api_key: Optional[str] = os.getenv("VOYAGE_API_KEY")
+    knowledge_schema: str = os.getenv("KNOWLEDGE_VECTOR_SCHEMA", "ai")
+    slide_knowledge_table: str = os.getenv("SLIDE_KNOWLEDGE_TABLE", "slide_chunks_knowledge")
+    lecture_knowledge_table: str = os.getenv("LECTURE_KNOWLEDGE_TABLE", "lecture_chunks_knowledge")
+    voyage_model_id: str = os.getenv("VOYAGE_MODEL_ID", "voyage-3-lite")
+    voyage_dimensions: int = _int_env("VOYAGE_EMBED_DIMENSIONS", 512)
 
 
 settings = Settings()

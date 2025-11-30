@@ -229,6 +229,8 @@ async def upload_document(
             document_chunk_pipeline.process_document,
             document.id,
             document.storage_key,
+            document.owner_id,
+            document.course_id,
         )
     response.status_code = status.HTTP_201_CREATED if created else status.HTTP_200_OK
     return DocumentUploadResponse(

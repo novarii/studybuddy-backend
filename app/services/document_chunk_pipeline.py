@@ -3,15 +3,20 @@ from __future__ import annotations
 import io
 import json
 import logging
-from typing import Dict
+from typing import Callable, Dict, Optional
 from uuid import UUID
 
+from agno.knowledge import Knowledge
+
+from ..agents.knowledge_builder import get_slide_knowledge
 from ..agents.pdf_description_agent import SlideDescriptionAgent
 from ..storage import StorageBackend
-from .pdf_slide_chunks_service import SlideChunkingService
+from .pdf_slide_chunks_service import SlideChunkingResult, SlideChunkingService
 from .pdf_slides_service import InMemorySlideHashRepository, SlideExtractionService, SlideImagePayload
 
 logger = logging.getLogger(__name__)
+
+KnowledgeFactory = Callable[[], Optional[Knowledge]]
 
 
 class DocumentChunkPipeline:
@@ -22,11 +27,19 @@ class DocumentChunkPipeline:
         storage: StorageBackend,
         *,
         chunk_storage_prefix: str = "document_chunks",
+        knowledge_factory: KnowledgeFactory | None = None,
     ) -> None:
         self.storage = storage
         self.chunk_storage_prefix = chunk_storage_prefix
+        self._knowledge_factory = knowledge_factory or get_slide_knowledge
 
-    def process_document(self, document_id: UUID, pdf_storage_key: str) -> None:
+    def process_document(
+        self,
+        document_id: UUID,
+        pdf_storage_key: str,
+        owner_id: UUID,
+        course_id: UUID,
+    ) -> None:
         """Background entry point: extract slides, describe them, and write chunk payload."""
 
         chunk_service = self._build_chunking_service()
@@ -72,6 +85,7 @@ class DocumentChunkPipeline:
             mime_type="application/json",
         )
         logger.info("Stored %s slide chunks for document %s", len(chunk_records), document_id)
+        self._ingest_into_knowledge(result, document_id=document_id, course_id=course_id, owner_id=owner_id)
 
     def _chunk_storage_key(self, document_id: UUID) -> str:
         return f"{self.chunk_storage_prefix}/{document_id}.json"
@@ -80,3 +94,35 @@ class DocumentChunkPipeline:
         extractor = SlideExtractionService(self.storage, InMemorySlideHashRepository())
         description_agent = SlideDescriptionAgent()
         return SlideChunkingService(extractor, description_agent)
+
+    def _ingest_into_knowledge(
+        self,
+        result: SlideChunkingResult,
+        *,
+        document_id: UUID,
+        course_id: UUID,
+        owner_id: UUID,
+    ) -> None:
+        if self._knowledge_factory is None:
+            return
+        knowledge = self._knowledge_factory()
+        if knowledge is None:
+            logger.info("Slide knowledge not available; skipping ingestion for document %s", document_id)
+            return
+
+        for chunk in result.chunks:
+            metadata = {
+                "document_id": str(document_id),
+                "course_id": str(course_id),
+                "owner_id": str(owner_id),
+                "slide_number": chunk.slide_number,
+                "slide_type": chunk.content.slide_type.value,
+            }
+            try:
+                knowledge.add_content(text_content=chunk.chunk_text, metadata=metadata)
+            except Exception:  # pragma: no cover - ingestion best-effort
+                logger.exception(
+                    "Failed to add slide %s of document %s to knowledge base",
+                    chunk.slide_number,
+                    document_id,
+                )
