@@ -119,8 +119,6 @@ class LecturesService:
             return
         db.delete(link)
         db.flush()
-        if self.lecture_chunk_pipeline is not None:
-            self.lecture_chunk_pipeline.remove_user_chunks(lecture_id, user_id)
 
         remaining = (
             db.execute(
@@ -151,7 +149,6 @@ class LecturesService:
             lecture = db.get(Lecture, lecture_id)
             if lecture is None:
                 return
-            user_ids = self._fetch_lecture_user_ids(db, lecture_id)
 
             lecture.status = LectureStatus.downloading
             lecture.error_message = None
@@ -205,7 +202,6 @@ class LecturesService:
                             self.lecture_chunk_pipeline.process_transcript_segments(
                                 lecture_id=lecture.id,
                                 course_id=lecture.course_id,
-                                user_ids=user_ids,
                                 segments=transcription_result.segments,
                             )
                         except Exception:  # pragma: no cover - background safety
@@ -267,7 +263,3 @@ class LecturesService:
             self.storage.delete_file(lecture.transcript_storage_key)
         if self.lecture_chunk_pipeline is not None:
             self.lecture_chunk_pipeline.cleanup_lecture(lecture.id)
-
-    def _fetch_lecture_user_ids(self, db: Session, lecture_id: UUID) -> list[UUID]:
-        stmt = select(UserLecture.user_id).where(UserLecture.lecture_id == lecture_id)
-        return list(db.execute(stmt).scalars().all())

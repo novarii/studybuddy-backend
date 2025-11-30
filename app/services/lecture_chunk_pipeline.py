@@ -56,7 +56,7 @@ class LectureChunkingResult:
 
 
 class LectureChunkPipeline:
-    """Convert Whisper transcript segments into ~60 second knowledge chunks."""
+    """Convert Whisper transcript segments into ~180 second knowledge chunks."""
 
     def __init__(
         self,
@@ -76,12 +76,10 @@ class LectureChunkPipeline:
         *,
         lecture_id: UUID,
         course_id: UUID,
-        user_ids: Sequence[UUID],
-        segments: Sequence[Dict[str, Any]] | None,
+        segments: List[Dict[str, Any]] | None,
     ) -> None:
         """Build lecture chunks from Whisper segments and ingest them."""
 
-        unique_user_ids = list(dict.fromkeys(user_ids))
         normalized_segments = self._normalize_segments(segments)
         if not normalized_segments:
             logger.info("Lecture %s has no transcript segments; skipping chunk pipeline", lecture_id)
@@ -101,19 +99,13 @@ class LectureChunkPipeline:
             chunks=chunks,
         )
         self._store_chunk_payload(result)
-        if unique_user_ids:
-            self._ingest_into_knowledge(result, user_ids=unique_user_ids)
+        self._ingest_into_knowledge(result)
 
     def cleanup_lecture(self, lecture_id: UUID) -> None:
         """Remove chunk artifacts and vectors for a lecture."""
 
         self._delete_chunk_artifact(lecture_id)
         self._remove_from_knowledge({"lecture_id": str(lecture_id)})
-
-    def remove_user_chunks(self, lecture_id: UUID, user_id: UUID) -> None:
-        """Drop chunk vectors for a specific user/lecture pair."""
-
-        self._remove_from_knowledge({"lecture_id": str(lecture_id), "user_id": str(user_id)})
 
     def _normalize_segments(
         self,
@@ -208,8 +200,6 @@ class LectureChunkPipeline:
     def _ingest_into_knowledge(
         self,
         result: LectureChunkingResult,
-        *,
-        user_ids: Sequence[UUID],
     ) -> None:
         if not self._knowledge_factory:
             return
@@ -228,17 +218,14 @@ class LectureChunkPipeline:
                 "end_seconds": chunk.end,
                 "chunk_index": chunk.chunk_index,
             }
-            for user_id in user_ids:
-                metadata_with_user = dict(metadata, user_id=str(user_id))
-                try:
-                    knowledge.add_content(text_content=chunk.text, metadata=metadata_with_user)
-                except Exception:  # pragma: no cover - ingestion best-effort
-                    logger.exception(
-                        "Failed to add lecture chunk %s for lecture %s (user %s)",
-                        chunk.chunk_index,
-                        result.lecture_id,
-                        user_id,
-                    )
+            try:
+                knowledge.add_content(text_content=chunk.text, metadata=metadata)
+            except Exception:  # pragma: no cover - ingestion best-effort
+                logger.exception(
+                    "Failed to add lecture chunk %s for lecture %s",
+                    chunk.chunk_index,
+                    result.lecture_id,
+                )
 
     def _remove_from_knowledge(self, metadata: Dict[str, str]) -> None:
         if not self._knowledge_factory:
