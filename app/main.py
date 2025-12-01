@@ -19,7 +19,10 @@ from sqlalchemy import select
 from sqlalchemy.exc import NoResultFound
 from sqlalchemy.orm import Session
 
+from agno.os import AgentOS
+
 from .api.auth import AuthenticatedUser, require_user
+from .agents.chat_agent import create_chat_agent
 from .core.config import settings
 from .database.db import get_db
 from .database.models import Course, Lecture
@@ -74,6 +77,7 @@ lectures_service = LecturesService(
 )
 documents_service = DocumentsService(storage_backend)
 document_chunk_pipeline = DocumentChunkPipeline(storage_backend)
+chat_agent = create_chat_agent()
 
 @app.get("/api/health")
 async def health_check():
@@ -304,3 +308,11 @@ async def delete_document(
         documents_service.remove_user_from_document(db, document_id, current_user.user_id)
     document_chunk_pipeline.cleanup_document(document_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+agent_os = AgentOS(
+    description="StudyBuddy AgentOS",
+    agents=[chat_agent],
+    base_app=app,
+)
+app = agent_os.get_app()

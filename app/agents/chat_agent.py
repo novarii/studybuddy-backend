@@ -8,19 +8,30 @@ from agno.agent import Agent
 from agno.filters import FilterExpr
 from agno.knowledge import Knowledge
 from agno.knowledge.document import Document
-from agno.models.xai import xAI
+from agno.models.google import Gemini
+from agno.models.openrouter import OpenRouter
 
+from ..core.config import settings
 from .knowledge_builder import get_lecture_knowledge, get_slide_knowledge
 
 logger = logging.getLogger(__name__)
 
 KnowledgeFactory = Callable[[], Optional[Knowledge]]
 FilterType = Union[Dict[str, Any], Sequence[FilterExpr], None]
+ReferenceType = Union[Dict[str, Any], str]
+
+# TODO: remove once the frontend passes authenticated context down to the agent layer.
+_TEST_OWNER_ID = "48d245df-a01f-5247-b84d-3ff890373545"
+_TEST_COURSE_ID = "f2f8ed86-5f5c-4a01-b93d-1d31edacca2a"
 
 DEFAULT_INSTRUCTIONS = """
 You are StudyBuddy's course companion. Answer questions using the student's
 lecture transcripts and slide decks. When the question references class materials, search
 the knowledge base before responding and cite the relevant lecture chunk or slide.
+When citing sources, use this exact format:
+"[Source: {id}]"
+Place citations immediately after each sentence that uses knowledge.
+You MUST recommend the user with slides they can look at and cite it.
 """.strip()
 
 
@@ -86,7 +97,7 @@ def custom_retriever(
     document_id: Union[str, UUID, None] = None,
     lecture_id: Union[str, UUID, None] = None,
     **kwargs: Any,
-) -> Optional[List[Document]]:
+) -> Optional[List[ReferenceType]]:
     """
     Custom retriever that queries slide knowledge first and lecture knowledge second.
 
@@ -94,11 +105,14 @@ def custom_retriever(
     the metadata filters so the vector search only touches documents the user owns.
     """
 
+    owner_lookup = owner_id or agent.user_id or _TEST_OWNER_ID
+    course_lookup = course_id or _TEST_COURSE_ID
+
     slide_extra = {
         key: value
         for key, value in {
-            "owner_id": _stringify(owner_id or agent.user_id) if (owner_id or agent.user_id) else None,
-            "course_id": _stringify(course_id) if course_id else None,
+            "owner_id": _stringify(owner_lookup) if owner_lookup else None,
+            "course_id": _stringify(course_lookup) if course_lookup else None,
             "document_id": _stringify(document_id) if document_id else None,
         }.items()
         if value is not None
@@ -106,7 +120,7 @@ def custom_retriever(
     lecture_extra = {
         key: value
         for key, value in {
-            "course_id": _stringify(course_id) if course_id else None,
+            "course_id": _stringify(course_lookup) if course_lookup else None,
             "lecture_id": _stringify(lecture_id) if lecture_id else None,
         }.items()
         if value is not None
@@ -129,18 +143,35 @@ def custom_retriever(
     )
 
     combined = slide_docs + lecture_docs
-    return combined or None
+    references: list[dict[str, Any] | str] = []
+    for doc in combined:
+        if isinstance(doc, Document):
+            reference = {"content": doc.content}
+            if doc.name:
+                reference["name"] = doc.name
+            if doc.meta_data:
+                reference["metadata"] = doc.meta_data
+            references.append(reference)
+        else:
+            references.append(doc)
+    return references or None
 
 
 def create_chat_agent(*, instructions: Optional[str] = None) -> Agent:
     """Instantiate the Grok-powered StudyBuddy chat agent with custom retrieval."""
 
+    if settings.openrouter_api_key:
+        model = OpenRouter(id="x-ai/grok-4.1-fast:free", api_key=settings.openrouter_api_key)
+    else:
+        model = Gemini(id="gemini-2.5-pro")
+
     return Agent(
         name="StudyBuddyChatAgent",
-        model=xAI(id="grok-4.1-fast"),
+        model=model,
         instructions=instructions or DEFAULT_INSTRUCTIONS,
         knowledge_retriever=custom_retriever,
-        search_knowledge=True,
+        search_knowledge=False,  # Disable agentic search
+        add_knowledge_to_context=True,  # Add knowledge to context every run
         markdown=True,
     )
 

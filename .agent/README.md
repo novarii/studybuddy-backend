@@ -7,6 +7,7 @@ This folder hosts all knowledge required to work on StudyBuddy Backend. Start he
 - [System/database_schema.md](System/database_schema.md) — Detailed PostgreSQL schema, enums, constraints, and lifecycle notes.
 - [System/slide_chunk_pipeline.md](System/slide_chunk_pipeline.md) — Implementation details for the slide extraction, AI chunking, and PgVector knowledge ingestion pipeline.
 - [System/lecture_chunk_pipeline.md](System/lecture_chunk_pipeline.md) — Transcript-driven chunking pipeline for lectures plus ingestion/cleanup responsibilities.
+- [System/agentos_testing.md](System/agentos_testing.md) — How to launch the AgentOS control plane locally and exercise the StudyBuddy chat agent without the frontend.
 
 ## Tasks
 - `.agent/Tasks/` — Product requirements & implementation plans per feature (see file names for scope).

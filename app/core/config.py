@@ -78,6 +78,7 @@ class Settings:
             if raw.strip()
         )
     )
+    openrouter_api_key: Optional[str] = os.getenv("OPENROUTER_API_KEY")
     whisper_server_ip: Optional[str] = os.getenv("WHISPER_SERVER_IP")
     whisper_server_port: Optional[int] = _optional_int_env("WHISPER_SERVER_PORT")
     whisper_request_timeout_seconds: int = _int_env("WHISPER_REQUEST_TIMEOUT_SECONDS", 180)

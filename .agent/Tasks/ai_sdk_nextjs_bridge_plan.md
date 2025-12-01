@@ -96,8 +96,8 @@
 
 ## Assumptions & Ambiguities
 - **Next.js Runtime**: Assuming Next.js App Router with Edge-compatible API routes; if using Pages Router or Node runtime, streaming APIs differ.
-- **Auth Context**: Assuming we can extract a verified user ID/server session before proxying; not defined whether we use NextAuth, Auth0, or custom JWT.
-- **Chat History Source**: Plan assumes either server persists history or client sends entire history; need confirmation on persistence requirements.
+- **Auth Context**: Clerk Auth is used; Next.js proxy must forward the Clerk session (e.g., via cookies or bearer token), and FastAPI should keep using `require_user`.
+- **Chat History Source**: Confirmed we will persist history per session using Agno’s session DB; resume flow will load from server.
 - **Tool Support**: Not clear whether we need client-side tools (e.g., location confirmation). Current plan keeps the proxy agnostic, but implementing tools may require additional UI components.
 - **Metadata Schema**: Assumes Agno responses will include chunk metadata (lecture_id, slide_number) for UI display; if not, we must extend the backend to send it.
 - **Error Handling Expectations**: Need confirmation on desired UX when backend/agent errors occur (toast vs inline message).
