@@ -86,6 +86,72 @@ def _search_knowledge(
         return []
 
 
+def retrieve_documents(
+    *,
+    query: str,
+    num_documents: int = 5,
+    filters: FilterType = None,
+    owner_id: Union[str, UUID, None] = None,
+    course_id: Union[str, UUID, None] = None,
+    document_id: Union[str, UUID, None] = None,
+    lecture_id: Union[str, UUID, None] = None,
+    use_test_defaults: bool = False,
+) -> List[ReferenceType]:
+    owner_lookup = owner_id
+    course_lookup = course_id
+    if use_test_defaults:
+        owner_lookup = owner_lookup or _TEST_OWNER_ID
+        course_lookup = course_lookup or _TEST_COURSE_ID
+
+    slide_extra = {
+        key: value
+        for key, value in {
+            "owner_id": _stringify(owner_lookup) if owner_lookup else None,
+            "course_id": _stringify(course_lookup) if course_lookup else None,
+            "document_id": _stringify(document_id) if document_id else None,
+        }.items()
+        if value is not None
+    }
+    lecture_extra = {
+        key: value
+        for key, value in {
+            "course_id": _stringify(course_lookup) if course_lookup else None,
+            "lecture_id": _stringify(lecture_id) if lecture_id else None,
+        }.items()
+        if value is not None
+    }
+
+    slide_filters = _merge_filters(filters, slide_extra)
+    lecture_filters = _merge_filters(_strip_dict_key(filters, "owner_id"), lecture_extra)
+
+    slide_docs = _search_knowledge(
+        get_slide_knowledge,
+        query,
+        max_results=num_documents,
+        filters=slide_filters,
+    )
+    lecture_docs = _search_knowledge(
+        get_lecture_knowledge,
+        query,
+        max_results=num_documents,
+        filters=lecture_filters,
+    )
+
+    combined = slide_docs + lecture_docs
+    references: list[ReferenceType] = []
+    for doc in combined:
+        if isinstance(doc, Document):
+            reference: dict[str, Any] = {"content": doc.content}
+            if doc.name:
+                reference["name"] = doc.name
+            if doc.meta_data:
+                reference["metadata"] = doc.meta_data
+            references.append(reference)
+        else:
+            references.append(doc)
+    return references
+
+
 def custom_retriever(
     agent: Agent,
     query: str,
@@ -126,34 +192,16 @@ def custom_retriever(
         if value is not None
     }
 
-    slide_filters = _merge_filters(filters, slide_extra)
-    lecture_filters = _merge_filters(_strip_dict_key(filters, "owner_id"), lecture_extra)
-
-    slide_docs = _search_knowledge(
-        get_slide_knowledge,
-        query,
-        max_results=num_documents,
-        filters=slide_filters,
+    references = retrieve_documents(
+        query=query,
+        num_documents=num_documents,
+        filters=filters,
+        owner_id=owner_lookup,
+        course_id=course_lookup,
+        document_id=document_id,
+        lecture_id=lecture_id,
+        use_test_defaults=True,
     )
-    lecture_docs = _search_knowledge(
-        get_lecture_knowledge,
-        query,
-        max_results=num_documents,
-        filters=lecture_filters,
-    )
-
-    combined = slide_docs + lecture_docs
-    references: list[dict[str, Any] | str] = []
-    for doc in combined:
-        if isinstance(doc, Document):
-            reference = {"content": doc.content}
-            if doc.name:
-                reference["name"] = doc.name
-            if doc.meta_data:
-                reference["metadata"] = doc.meta_data
-            references.append(reference)
-        else:
-            references.append(doc)
     return references or None
 
 
