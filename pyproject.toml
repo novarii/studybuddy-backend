@@ -20,6 +20,7 @@ dependencies = [
     "google-genai>=1.52.0",
     "xai>=0.3.0",
     "openai>=2.8.1",
+    "mcp>=1.23.1",
 ]
 
 [tool.uv.sources]

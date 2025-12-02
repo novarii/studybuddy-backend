@@ -2,16 +2,31 @@
 
 from __future__ import annotations
 
+import argparse
 from typing import Any, Dict, Optional
+from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
-from ..agents.chat_agent import (
-    ReferenceType,
-    _TEST_COURSE_ID,
-    _TEST_OWNER_ID,
-    retrieve_documents,
-)
+if __package__ is None or __package__ == "":
+    import sys
+
+    repo_root = Path(__file__).resolve().parents[2]
+    if str(repo_root) not in sys.path:
+        sys.path.append(str(repo_root))
+    from app.agents.chat_agent import (  # type: ignore[import-not-found]
+        ReferenceType,
+        _TEST_COURSE_ID,
+        _TEST_OWNER_ID,
+        retrieve_documents,
+    )
+else:
+    from ..agents.chat_agent import (
+        ReferenceType,
+        _TEST_COURSE_ID,
+        _TEST_OWNER_ID,
+        retrieve_documents,
+    )
 
 
 mcp = FastMCP(
@@ -52,5 +67,27 @@ def retrieve_course_material(
     }
 
 
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Run the CourseMaterialRAG MCP server")
+    parser.add_argument(
+        "--transport",
+        choices=["stdio", "streamable-http"],
+        default="stdio",
+        help="Transport type; use streamable-http when exposing over HTTP",
+    )
+    parser.add_argument("--host", default="127.0.0.1", help="HTTP host when using streamable-http")
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=8765,
+        help="HTTP port when using streamable-http",
+    )
+    return parser.parse_args()
+
+
 if __name__ == "__main__":
-    mcp.run()
+    args = _parse_args()
+    if args.transport == "streamable-http":
+        mcp.settings.host = args.host
+        mcp.settings.port = args.port
+    mcp.run(transport=args.transport)

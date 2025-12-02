@@ -19,9 +19,9 @@ Expose StudyBuddy's custom knowledge retriever over the Model Context Protocol (
    - Use `uv run mcp install app/mcp/server.py --name StudyBuddy` to register it with Claude Desktop.
 3. For HTTP transport (helpful for local testing or MCP-aware IDEs):
    ```bash
-   uv run python app/mcp/server.py  # defaults to stdio
+   uv run python app/mcp/server.py --transport streamable-http --host 0.0.0.0 --port 9000
    ```
-   or tweak `mcp.run(transport="streamable-http")` inside the module.
+   The CLI flags configure the FastMCP server’s host/port before calling `mcp.run`.
 
 ## Tool Parameters
 - `query` *(required)* — free-form search string.
