@@ -22,7 +22,7 @@ ReferenceType = Union[Dict[str, Any], str]
 
 # TODO: remove once the frontend passes authenticated context down to the agent layer.
 _TEST_OWNER_ID = "48d245df-a01f-5247-b84d-3ff890373545"
-_TEST_COURSE_ID = "f2f8ed86-5f5c-4a01-b93d-1d31edacca2a"
+_TEST_COURSE_ID = "c5b51d23-d26f-4b7e-900a-44c8e738011c"
 
 DEFAULT_INSTRUCTIONS = """
 You are StudyBuddy's course companion. Answer questions using the student's

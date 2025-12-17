@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from uuid import UUID
 
 from fastapi import (
@@ -24,7 +25,7 @@ from agno.os import AgentOS
 from .api.auth import AuthenticatedUser, require_user
 from .agents.chat_agent import create_chat_agent
 from .core.config import settings
-from .database.db import get_db
+from .database.db import SessionLocal, get_db
 from .database.models import Course, Lecture
 from .schemas import (
     CourseResponse,
@@ -36,7 +37,7 @@ from .schemas import (
     LectureStatusListItem,
     LectureStatusResponse,
 )
-from .services.document_chunk_pipeline import DocumentChunkPipeline
+from .services.document_chunk_pipeline import DocumentChunkPipeline, DocumentChunkPipelineError
 from .services.documents_service import DocumentsService
 from .services.downloaders.downloader import FFmpegAudioExtractor
 from .services.downloaders.panopto_downloader import PanoptoPackageDownloader
@@ -78,6 +79,33 @@ lectures_service = LecturesService(
 documents_service = DocumentsService(storage_backend)
 document_chunk_pipeline = DocumentChunkPipeline(storage_backend)
 chat_agent = create_chat_agent()
+
+logger = logging.getLogger(__name__)
+
+
+def _process_document_pipeline(
+    document_id: UUID,
+    storage_key: str,
+    owner_id: UUID,
+    course_id: UUID,
+) -> None:
+    try:
+        document_chunk_pipeline.process_document(
+            document_id,
+            storage_key,
+            owner_id,
+            course_id,
+        )
+    except DocumentChunkPipelineError:
+        logger.exception("Document chunk pipeline failed for %s", document_id)
+        document_chunk_pipeline.cleanup_document(document_id)
+        db = SessionLocal()
+        try:
+            documents_service.delete_document(db, document_id)
+        except Exception:
+            logger.exception("Failed to delete document %s after chunk failure", document_id)
+        finally:
+            db.close()
 
 @app.get("/api/health")
 async def health_check():
@@ -233,7 +261,7 @@ async def upload_document(
     )
     if created:
         background_tasks.add_task(
-            document_chunk_pipeline.process_document,
+            _process_document_pipeline,
             document.id,
             document.storage_key,
             document.owner_id,

@@ -21,6 +21,7 @@ dependencies = [
     "xai>=0.3.0",
     "openai>=2.8.1",
     "mcp>=1.23.1",
+    "fastmcp>=2.13.2",
 ]
 
 [tool.uv.sources]

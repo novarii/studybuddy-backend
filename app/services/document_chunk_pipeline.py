@@ -19,6 +19,11 @@ logger = logging.getLogger(__name__)
 KnowledgeFactory = Callable[[], Optional[Knowledge]]
 
 
+class DocumentChunkPipelineError(RuntimeError):
+    """Raised when slide chunk generation fails for a document."""
+
+
+
 class DocumentChunkPipeline:
     """Run slide chunking for uploaded documents and persist the results."""
 
@@ -54,9 +59,9 @@ class DocumentChunkPipeline:
         chunk_service = self._build_chunking_service()
         try:
             result = chunk_service.generate_chunks(document_id, pdf_storage_key)
-        except Exception:  # pragma: no cover - defensive logging for background task
+        except Exception as exc:  # pragma: no cover - defensive logging for background task
             logger.exception("Slide chunk generation failed for document %s", document_id)
-            return
+            raise DocumentChunkPipelineError("Slide chunk generation failed") from exc
 
         chunk_storage_key = self._chunk_storage_key(document_id)
         if not result.chunks:

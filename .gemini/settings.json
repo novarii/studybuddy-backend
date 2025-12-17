@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "CourseMaterialRAG": {
+      "command": "uv",
+      "args": [
+        "run",
+        "--with",
+        "fastmcp",
+        "fastmcp",
+        "run",
+        "/Users/novari/Repos/studybuddy-backend/app/mcp/server.py"
+      ]
+    }
+  }
+}

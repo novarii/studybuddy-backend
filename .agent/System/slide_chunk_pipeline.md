@@ -7,17 +7,17 @@ PDF uploads now trigger an AI-assisted pipeline that renders slide images, dedup
 - **`SlideExtractionService` (`app/services/pdf_slides_service.py`)** — Uses PyMuPDF to render each page under a configurable zoom, computes perceptual hashes via `imagehash`, and drops duplicate slides in-memory.
 - **`SlideDescriptionAgent` (`app/agents/pdf_description_agent.py`)** — Wraps Agno + Gemini with a strict `SlideContent` schema; returns `SlideContentWithNumber` instances so slide numbers stay aligned even after deduplication.
 - **`SlideChunkingService` (`app/services/pdf_slide_chunks_service.py`)** — Orchestrates extraction + description and returns `SlideChunkingResult` with normalized chunk strings (`Text: … | Images: … | …`).
-- **`DocumentChunkPipeline` (`app/services/document_chunk_pipeline.py`)** — Background worker invoked after a document upload. It:
+- **`DocumentChunkPipeline` (`app/services/document_chunk_pipeline.py`)** — Background pipeline invoked after `/api/documents/upload` returns. It:
   1. Calls the chunking service using the PDF stored via `StorageBackend`.
   2. Persists a JSON artifact under `storage/document_chunks/{document_id}.json` for auditing / replays.
   3. Inserts each chunk into the slide knowledge base using Agno’s `Knowledge.add_content`.
-  4. Logs (but does not propagate) ingestion errors so uploads remain best-effort.
+  4. Raises `DocumentChunkPipelineError` if slide extraction or Gemini descriptions fail so the document can be deleted before the user interacts with it.
 - **`knowledge_builder` (`app/agents/knowledge_builder.py`)** — Creates cached `Knowledge` instances backed by `PgVector`, using a Voyage AI embedder. The schema defaults to `public` but can be overridden. The builder ensures the schema exists, configures the embedder, and lets Agno auto-provision the underlying tables.
 
 ## Document Upload Flow (extended)
-1. `/api/documents/upload` stores the PDF and, when a new record is created, schedules `DocumentChunkPipeline.process_document(document.id, document.storage_key, owner_id, course_id)` on FastAPI background tasks.
+1. `/api/documents/upload` stores the PDF and, when a new record is created, schedules `_process_document_pipeline` on FastAPI background tasks.
 2. The pipeline renders/deduplicates slides, writes the JSON artifact, and calls `knowledge.add_content(text_content=chunk.chunk_text, metadata={...})` for each unique slide. Metadata includes document, course, owner IDs, slide number, and slide type.
-3. On failures (Gemini error, Voyage embedding error, etc.), the exception is logged and the chunk is skipped; the upload still returns `201`.
+3. If slide extraction, Gemini descriptions, or artifact writing fail, `_process_document_pipeline` catches `DocumentChunkPipelineError`, deletes the document + artifacts, and logs the error so the client never sees a half-processed upload.
 
 ## Data Storage
 - **Chunk artifacts**: `storage/document_chunks/{document_id}.json` contains a list of slide hashes, dimensions, structured descriptions, and chunk strings.

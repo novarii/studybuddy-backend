@@ -27,6 +27,7 @@ FastAPI service providing Panopto lecture ingestion and PDF document uploads for
 
 4. **Start the API**
    ```bash
+   export CORS_ALLOW_ORIGINS="https://rochester.hosted.panopto.com"
    uvicorn app.main:app --reload
    ```
 
