@@ -20,10 +20,6 @@ KnowledgeFactory = Callable[[], Optional[Knowledge]]
 FilterType = Union[Dict[str, Any], Sequence[FilterExpr], None]
 ReferenceType = Union[Dict[str, Any], str]
 
-# TODO: remove once the frontend passes authenticated context down to the agent layer.
-_TEST_OWNER_ID = "48d245df-a01f-5247-b84d-3ff890373545"
-_TEST_COURSE_ID = "c5b51d23-d26f-4b7e-900a-44c8e738011c"
-
 DEFAULT_INSTRUCTIONS = """
 You are StudyBuddy's course companion. Answer questions using the student's
 lecture transcripts and slide decks. When the question references class materials, search
@@ -95,19 +91,12 @@ def retrieve_documents(
     course_id: Union[str, UUID, None] = None,
     document_id: Union[str, UUID, None] = None,
     lecture_id: Union[str, UUID, None] = None,
-    use_test_defaults: bool = False,
 ) -> List[ReferenceType]:
-    owner_lookup = owner_id
-    course_lookup = course_id
-    if use_test_defaults:
-        owner_lookup = owner_lookup or _TEST_OWNER_ID
-        course_lookup = course_lookup or _TEST_COURSE_ID
-
     slide_extra = {
         key: value
         for key, value in {
-            "owner_id": _stringify(owner_lookup) if owner_lookup else None,
-            "course_id": _stringify(course_lookup) if course_lookup else None,
+            "owner_id": _stringify(owner_id) if owner_id else None,
+            "course_id": _stringify(course_id) if course_id else None,
             "document_id": _stringify(document_id) if document_id else None,
         }.items()
         if value is not None
@@ -115,7 +104,7 @@ def retrieve_documents(
     lecture_extra = {
         key: value
         for key, value in {
-            "course_id": _stringify(course_lookup) if course_lookup else None,
+            "course_id": _stringify(course_id) if course_id else None,
             "lecture_id": _stringify(lecture_id) if lecture_id else None,
         }.items()
         if value is not None
@@ -171,26 +160,11 @@ def custom_retriever(
     the metadata filters so the vector search only touches documents the user owns.
     """
 
-    owner_lookup = owner_id or agent.user_id or _TEST_OWNER_ID
-    course_lookup = course_id or _TEST_COURSE_ID
-
-    slide_extra = {
-        key: value
-        for key, value in {
-            "owner_id": _stringify(owner_lookup) if owner_lookup else None,
-            "course_id": _stringify(course_lookup) if course_lookup else None,
-            "document_id": _stringify(document_id) if document_id else None,
-        }.items()
-        if value is not None
-    }
-    lecture_extra = {
-        key: value
-        for key, value in {
-            "course_id": _stringify(course_lookup) if course_lookup else None,
-            "lecture_id": _stringify(lecture_id) if lecture_id else None,
-        }.items()
-        if value is not None
-    }
+    owner_lookup = owner_id or agent.user_id
+    course_lookup = course_id
+    if not owner_lookup:
+        logger.warning("No owner context provided for retrieval")
+        return []
 
     references = retrieve_documents(
         query=query,
@@ -200,7 +174,6 @@ def custom_retriever(
         course_id=course_lookup,
         document_id=document_id,
         lecture_id=lecture_id,
-        use_test_defaults=True,
     )
     return references or None
 
