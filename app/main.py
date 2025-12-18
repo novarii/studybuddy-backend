@@ -24,7 +24,8 @@ from agno.os import AgentOS
 
 from .adapters import AgnoVercelAdapter, get_vercel_stream_headers
 from .api.auth import AuthenticatedUser, require_user
-from .agents.chat_agent import create_chat_agent, retrieve_documents
+from .agents.chat_agent import create_chat_agent, create_test_chat_agent, retrieve_documents
+from .agents.context_formatter import format_retrieval_context
 from .core.config import settings
 from .database.db import SessionLocal, get_db
 from .database.models import Course, Lecture
@@ -82,7 +83,6 @@ lectures_service = LecturesService(
 )
 documents_service = DocumentsService(storage_backend)
 document_chunk_pipeline = DocumentChunkPipeline(storage_backend)
-chat_agent = create_chat_agent()
 
 logger = logging.getLogger(__name__)
 
@@ -355,43 +355,57 @@ async def chat_stream(
 
     The response includes:
     - RAG sources with full metadata (document_id, lecture_id, slide_number, timestamps)
+      plus chunk_number for correlating citations like [1], [2] in the response
     - Streaming text deltas
     - Reasoning steps (if model provides them)
     - Tool calls (if agent uses tools)
+
+    The model receives a lean, numbered context (no metadata bloat), while the
+    client receives rich metadata for UI rendering.
     """
 
     async def generate_stream():
         adapter = AgnoVercelAdapter()
 
         try:
-            # 1. Pre-retrieve sources for immediate emission
-            pre_sources = []
+            # 1. Retrieve raw references
+            raw_references = []
             try:
-                references = retrieve_documents(
+                raw_references = retrieve_documents(
                     query=payload.message,
                     owner_id=current_user.user_id,
                     course_id=payload.course_id,
                     document_id=payload.document_id,
                     lecture_id=payload.lecture_id,
                 )
-                pre_sources = adapter.extract_sources_from_references(references)
             except Exception as e:
                 logger.warning("Pre-retrieval failed: %s", e)
 
-            # 2. Create agent and run with streaming
-            agent = create_chat_agent()
+            # 2. Format into lean model context + rich client sources
+            formatted = format_retrieval_context(raw_references, order_by="chronological")
 
-            # Run agent with streaming enabled
-            # The agent's custom_retriever will also retrieve (potentially same sources)
-            # but pre-retrieval ensures sources are shown immediately
+            # 3. Extract sources with chunk_number for client
+            pre_sources = adapter.extract_sources_from_references(formatted.client_sources)
+
+            # 4. Build user message with lean context injected
+            if formatted.model_context:
+                user_message = (
+                    f"{payload.message}\n\n"
+                    f"<references>\n{formatted.model_context}\n</references>"
+                )
+            else:
+                user_message = payload.message
+
+            # 5. Create agent and run with streaming
+            agent = create_chat_agent()
             stream = agent.run(
-                input=payload.message,
+                input=user_message,
                 stream=True,
                 stream_events=True,
                 user_id=str(current_user.user_id),
             )
 
-            # 3. Transform Agno stream to Vercel format
+            # 6. Transform Agno stream to Vercel format
             for chunk in adapter.transform_stream_sync(
                 stream,
                 pre_retrieved_sources=pre_sources,
@@ -409,9 +423,10 @@ async def chat_stream(
     )
 
 
+test_agent = create_test_chat_agent()
 agent_os = AgentOS(
     description="StudyBuddy AgentOS",
-    agents=[chat_agent],
+    agents=[test_agent],
     base_app=app,
 )
 app = agent_os.get_app()

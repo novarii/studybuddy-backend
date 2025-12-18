@@ -21,13 +21,20 @@ FilterType = Union[Dict[str, Any], Sequence[FilterExpr], None]
 ReferenceType = Union[Dict[str, Any], str]
 
 DEFAULT_INSTRUCTIONS = """
-You are StudyBuddy's course companion. Answer questions using the student's
-lecture transcripts and slide decks. When the question references class materials, search
-the knowledge base before responding and cite the relevant lecture chunk or slide.
-When citing sources, use this exact format:
-"[Source: {id}]"
-Place citations immediately after each sentence that uses knowledge.
-You MUST recommend the user with slides they can look at and cite it.
+You are StudyBuddy's course companion. Answer questions using the numbered references
+from the student's lecture transcripts and slide decks provided in the context.
+
+CITATION RULES:
+- Cite specific reference numbers in brackets: [1], [2], [3]
+- Place citations immediately after each claim: "The mitochondria is the powerhouse of the cell [2]."
+- You may cite multiple sources: "This concept appears in both the slides [1] and lecture [3]."
+- If combining information from multiple references, cite all relevant numbers.
+
+RESPONSE FORMAT:
+- Be concise and direct
+- Always ground your answers in the provided references
+- If the references don't contain relevant information, say so clearly
+- Recommend specific slides or lecture segments the student should review
 """.strip()
 
 
@@ -179,7 +186,13 @@ def custom_retriever(
 
 
 def create_chat_agent(*, instructions: Optional[str] = None) -> Agent:
-    """Instantiate the Grok-powered StudyBuddy chat agent with custom retrieval."""
+    """Instantiate the StudyBuddy chat agent.
+
+    Note: This agent does not use automatic knowledge retrieval. Instead,
+    the chat endpoint pre-retrieves references and injects a lean, numbered
+    context directly into the user message. This reduces token usage by
+    excluding metadata that the model doesn't need.
+    """
 
     if settings.openrouter_api_key:
         model = OpenRouter(id="x-ai/grok-4.1-fast", api_key=settings.openrouter_api_key)
@@ -190,11 +203,54 @@ def create_chat_agent(*, instructions: Optional[str] = None) -> Agent:
         name="StudyBuddyChatAgent",
         model=model,
         instructions=instructions or DEFAULT_INSTRUCTIONS,
-        knowledge_retriever=custom_retriever,
-        search_knowledge=False,  # Disable agentic search
-        add_knowledge_to_context=True,  # Add knowledge to context every run
+        search_knowledge=False,
+        add_knowledge_to_context=False,  # Context injected manually via formatted references
         markdown=True,
     )
 
 
-__all__ = ["create_chat_agent", "custom_retriever"]
+def _test_retriever(
+    agent: Agent,
+    query: str,
+    num_documents: int = 5,
+    **kwargs: Any,
+) -> Optional[List[ReferenceType]]:
+    """Test retriever using TEST_COURSE_ID and TEST_OWNER_ID from env vars."""
+    from .context_formatter import format_retrieval_context
+
+    if not settings.test_course_id or not settings.test_owner_id:
+        logger.warning("TEST_COURSE_ID and TEST_OWNER_ID must be set in env for test retriever")
+        return []
+
+    raw_refs = retrieve_documents(
+        query=query,
+        num_documents=num_documents,
+        owner_id=settings.test_owner_id,
+        course_id=settings.test_course_id,
+    )
+    # Return formatted context as a single "reference" for the model
+    formatted = format_retrieval_context(raw_refs, order_by="chronological")
+    if formatted.model_context:
+        return [{"content": formatted.model_context}]
+    return []
+
+
+def create_test_chat_agent() -> Agent:
+    """Create a test agent for AgentOS with hardcoded course_id."""
+    if settings.openrouter_api_key:
+        model = OpenRouter(id="x-ai/grok-4.1-fast", api_key=settings.openrouter_api_key)
+    else:
+        model = Gemini(id="gemini-2.5-pro")
+
+    return Agent(
+        name="StudyBuddyTestAgent",
+        model=model,
+        instructions=DEFAULT_INSTRUCTIONS,
+        knowledge_retriever=_test_retriever,
+        search_knowledge=False,
+        add_knowledge_to_context=True,
+        markdown=True,
+    )
+
+
+__all__ = ["create_chat_agent", "custom_retriever", "create_test_chat_agent"]
