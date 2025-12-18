@@ -90,6 +90,9 @@ class Settings:
     lecture_knowledge_table: str = os.getenv("LECTURE_KNOWLEDGE_TABLE", "lecture_chunks_knowledge")
     voyage_model_id: str = os.getenv("VOYAGE_MODEL_ID", "voyage-3-lite")
     voyage_dimensions: int = _int_env("VOYAGE_EMBED_DIMENSIONS", 512)
+    # Test IDs for AgentOS playground testing
+    test_course_id: Optional[str] = os.getenv("TEST_COURSE_ID")
+    test_owner_id: Optional[str] = os.getenv("TEST_OWNER_ID")
 
 
 settings = Settings()

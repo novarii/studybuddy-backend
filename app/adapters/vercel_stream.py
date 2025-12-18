@@ -49,6 +49,8 @@ class RAGSource:
     source_id: str
     source_type: str  # "slide" or "lecture"
     content_preview: str
+    # Citation number for correlating with [1], [2], etc. in response
+    chunk_number: Optional[int] = None
     # Slide-specific
     document_id: Optional[str] = None
     slide_number: Optional[int] = None
@@ -209,8 +211,9 @@ class AgnoVercelAdapter:
         Extract RAGSource objects from retriever output.
 
         Args:
-            references: List of reference dicts from retrieve_documents()
-                Each dict has: content, name (optional), metadata (optional)
+            references: List of reference dicts from retrieve_documents() or
+                format_retrieval_context(). Each dict has: content, name (optional),
+                metadata (optional), chunk_number (optional - set by context_formatter).
 
         Returns:
             List of RAGSource objects with full metadata.
@@ -219,18 +222,21 @@ class AgnoVercelAdapter:
             return []
 
         sources: List[RAGSource] = []
-        for ref in references:
+        for idx, ref in enumerate(references, start=1):
             if isinstance(ref, str):
                 # Plain string reference
                 sources.append(RAGSource(
                     source_id=str(uuid4()),
                     source_type="unknown",
                     content_preview=ref[:200] if ref else "",
+                    chunk_number=idx,
                 ))
                 continue
 
             metadata = ref.get("metadata", {})
             content = ref.get("content", "")
+            # Use chunk_number from enriched reference if present, else fallback to index
+            chunk_number = ref.get("chunk_number", idx)
 
             # Determine source type based on metadata
             if metadata.get("document_id"):
@@ -251,6 +257,7 @@ class AgnoVercelAdapter:
                 source_id=source_id,
                 source_type=source_type,
                 content_preview=content[:200] if content else "",
+                chunk_number=chunk_number,
                 document_id=metadata.get("document_id"),
                 slide_number=metadata.get("slide_number"),
                 lecture_id=metadata.get("lecture_id"),
