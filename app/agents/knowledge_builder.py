@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from functools import lru_cache
 from typing import Optional
 
@@ -58,6 +59,11 @@ def _build_knowledge(*, table_name: str, description: str) -> Optional[Knowledge
 
 @lru_cache(maxsize=1)
 def _ensure_schema_exists(schema_name: str) -> None:
+    # Validate schema name format (alphanumeric and underscore only)
+    if not re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', schema_name):
+        raise ValueError(f"Invalid schema name: {schema_name}")
+
     engine = create_engine(settings.database_url)
     with engine.begin() as connection:
+        # Safe after validation - PostgreSQL identifiers can't be parameterized
         connection.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{schema_name}"'))

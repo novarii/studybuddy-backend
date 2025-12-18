@@ -3,4 +3,4 @@
 .DS_Store
 AGENTS.md
 __pycache__/
-storage/
+/storage/

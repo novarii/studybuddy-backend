@@ -16,15 +16,11 @@ if __package__ is None or __package__ == "":
         sys.path.append(str(repo_root))
     from app.agents.chat_agent import (  # type: ignore[import-not-found]
         ReferenceType,
-        _TEST_COURSE_ID,
-        _TEST_OWNER_ID,
         retrieve_documents,
     )
 else:
     from ..agents.chat_agent import (
         ReferenceType,
-        _TEST_COURSE_ID,
-        _TEST_OWNER_ID,
         retrieve_documents,
     )
 
@@ -41,14 +37,22 @@ mcp = FastMCP(
 def retrieve_course_material(
     query: str,
     *,
-    owner_id: Optional[str] = _TEST_OWNER_ID,
-    course_id: Optional[str] = _TEST_COURSE_ID,
+    owner_id: Optional[str] = None,
+    course_id: Optional[str] = None,
     document_id: Optional[str] = None,
     lecture_id: Optional[str] = None,
     max_results: int = 5,
     filters: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Return slide + lecture chunks relevant to a course-related query."""
+
+    if not owner_id:
+        return {
+            "query": query,
+            "results": [],
+            "count": 0,
+            "error": "owner_id is required",
+        }
 
     results: list[ReferenceType] = retrieve_documents(
         query=query,
@@ -58,7 +62,6 @@ def retrieve_course_material(
         course_id=course_id,
         document_id=document_id,
         lecture_id=lecture_id,
-        use_test_defaults=True,
     )
     return {
         "query": query,

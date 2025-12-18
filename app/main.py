@@ -48,13 +48,15 @@ from .storage import LocalStorageBackend
 
 app = FastAPI(title="StudyBuddy Backend")
 
-allow_origins = settings.cors_allow_origins or ["*"]
+if not settings.cors_allow_origins:
+    raise RuntimeError("CORS_ALLOW_ORIGINS must be configured")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=list(allow_origins),
+    allow_origins=list(settings.cors_allow_origins),
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 storage_backend = LocalStorageBackend(settings.storage_root)
