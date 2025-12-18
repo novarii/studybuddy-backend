@@ -73,3 +73,13 @@ class LectureStatusListItem(BaseModel):
     status: LectureStatus
     created_at: datetime
     updated_at: datetime
+
+
+class ChatRequest(BaseModel):
+    """Request body for POST /api/agent/chat."""
+
+    message: constr(strip_whitespace=True, min_length=1)
+    course_id: UUID
+    document_id: Optional[UUID] = None
+    lecture_id: Optional[UUID] = None
+    session_id: Optional[str] = None

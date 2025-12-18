@@ -22,12 +22,14 @@ from sqlalchemy.orm import Session
 
 from agno.os import AgentOS
 
+from .adapters import AgnoVercelAdapter, get_vercel_stream_headers
 from .api.auth import AuthenticatedUser, require_user
-from .agents.chat_agent import create_chat_agent
+from .agents.chat_agent import create_chat_agent, retrieve_documents
 from .core.config import settings
 from .database.db import SessionLocal, get_db
 from .database.models import Course, Lecture
 from .schemas import (
+    ChatRequest,
     CourseResponse,
     DocumentDetailResponse,
     DocumentUploadResponse,
@@ -336,6 +338,73 @@ async def delete_document(
         documents_service.remove_user_from_document(db, document_id, current_user.user_id)
     document_chunk_pipeline.cleanup_document(document_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@app.post("/api/agent/chat")
+async def chat_stream(
+    payload: ChatRequest,
+    current_user: AuthenticatedUser = Depends(require_user),
+):
+    """
+    Streaming chat endpoint compatible with Vercel AI SDK v5.
+
+    Returns Server-Sent Events in the Vercel UI Message Stream format.
+    Sources are emitted BEFORE text begins for "searching..." UI states.
+
+    The response includes:
+    - RAG sources with full metadata (document_id, lecture_id, slide_number, timestamps)
+    - Streaming text deltas
+    - Reasoning steps (if model provides them)
+    - Tool calls (if agent uses tools)
+    """
+
+    async def generate_stream():
+        adapter = AgnoVercelAdapter()
+
+        try:
+            # 1. Pre-retrieve sources for immediate emission
+            pre_sources = []
+            try:
+                references = retrieve_documents(
+                    query=payload.message,
+                    owner_id=current_user.user_id,
+                    course_id=payload.course_id,
+                    document_id=payload.document_id,
+                    lecture_id=payload.lecture_id,
+                )
+                pre_sources = adapter.extract_sources_from_references(references)
+            except Exception as e:
+                logger.warning("Pre-retrieval failed: %s", e)
+
+            # 2. Create agent and run with streaming
+            agent = create_chat_agent()
+
+            # Run agent with streaming enabled
+            # The agent's custom_retriever will also retrieve (potentially same sources)
+            # but pre-retrieval ensures sources are shown immediately
+            stream = agent.run(
+                input=payload.message,
+                stream=True,
+                stream_events=True,
+                user_id=str(current_user.user_id),
+            )
+
+            # 3. Transform Agno stream to Vercel format
+            for chunk in adapter.transform_stream_sync(
+                stream,
+                pre_retrieved_sources=pre_sources,
+            ):
+                yield chunk
+
+        except Exception as e:
+            logger.exception("Chat stream error")
+            yield adapter._emit_error(f"Stream error: {str(e)}")
+            yield adapter._emit_done()
+
+    return StreamingResponse(
+        generate_stream(),
+        headers=get_vercel_stream_headers(),
+    )
 
 
 agent_os = AgentOS(

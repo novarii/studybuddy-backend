@@ -16,14 +16,19 @@ StudyBuddy Backend is a FastAPI service that orchestrates Panopto lecture audio 
 ## Project Structure
 ```
 app/
+  adapters/                   # Protocol adapters (Agno-to-Vercel stream conversion)
+  agents/                     # Agno-based AI agents (chat, PDF description, knowledge builder)
   api/                        # Auth helpers and future API-specific utilities
   core/                       # Settings + shared utilities
   database/                   # SQLAlchemy session + models
+  mcp/                        # MCP server exposing knowledge retrieval as tools
   schemas/                    # Pydantic request/response models
   services/
     documents_service.py      # PDF upload + dedup + user linking
     lectures_service.py       # Lecture ingestion, Panopto + Whisper pipelines
     users_service.py          # Lazy user row creation
+    document_chunk_pipeline.py # Slide extraction, AI description, vector ingestion
+    lecture_chunk_pipeline.py  # Transcript chunking and vector ingestion
     downloaders/              # Download + extraction interfaces/adapters
     transcription_service.py  # Whisper transcription client/result structs
   storage/                    # StorageBackend interface + local implementation
@@ -88,10 +93,51 @@ The delete endpoint now also calls `DocumentChunkPipeline.cleanup_document(...)`
 | POST | `/api/documents/upload` | Upload/attach a PDF to a course + user. |
 | GET | `/api/documents/{document_id}` | Document metadata (no storage info). |
 | GET | `/api/documents/{document_id}/file` | Stream PDF bytes for linked user. |
-| DELETE | `/api/documents/{document_id}` | Delete the owner’s document (admins can remove any document). |
+| DELETE | `/api/documents/{document_id}` | Delete the owner's document (admins can remove any document). |
+| POST | `/api/agent/chat` | **Streaming chat endpoint** compatible with Vercel AI SDK v5 (SSE). |
 | GET | `/api/dev/lectures` | Dev-only listing of lectures (requires `DEV_ROUTES_ENABLED=true`). |
 
 All routes require a valid Clerk session token in the `Authorization` header or `__session` cookie; `app/auth.py` resolves the UUID used for authorization checks, so clients never submit `user_id` explicitly. Admin overrides are controlled by `ADMIN_USER_IDS` in configuration.
+
+## Chat Agent & Streaming Architecture
+
+The chat feature uses Agno agents with a custom RAG retriever and streams responses via a Vercel AI SDK v5-compatible adapter.
+
+### Components
+- **`app/agents/chat_agent.py`**: Creates the `StudyBuddyChatAgent` with a `custom_retriever` that searches both slide and lecture knowledge bases.
+- **`app/agents/knowledge_builder.py`**: Factory for PgVector-backed `Knowledge` instances with Voyage AI embeddings.
+- **`app/adapters/vercel_stream.py`**: `AgnoVercelAdapter` class that converts Agno `RunEvent` stream to Vercel AI SDK v5 SSE format.
+
+### Stream Format (Vercel AI SDK v5)
+The `/api/agent/chat` endpoint returns Server-Sent Events with header `x-vercel-ai-ui-message-stream: v1`:
+```
+data: {"type":"start","messageId":"..."}
+data: {"type":"source-document","sourceId":"...","mediaType":"slide","title":"..."}
+data: {"type":"data-rag-source","data":{...full metadata...}}
+data: {"type":"text-start","id":"..."}
+data: {"type":"text-delta","id":"...","delta":"Hello..."}
+data: {"type":"text-end","id":"..."}
+data: {"type":"finish"}
+data: [DONE]
+```
+
+### RAG Source Metadata
+Sources include full metadata for frontend deep-linking:
+- **Slides**: `document_id`, `slide_number`, `course_id`, `owner_id`
+- **Lectures**: `lecture_id`, `start_seconds`, `end_seconds`, `course_id`
+
+### Event Mapping (Agno → Vercel)
+| Agno Event | Vercel SSE Type |
+|------------|-----------------|
+| `RunStartedEvent` | `start` |
+| `RunContentEvent` | `text-delta` |
+| `RunCompletedEvent` | `text-end`, `finish` |
+| `RunErrorEvent` | `error` |
+| `ReasoningStepEvent` | `reasoning-delta` |
+| `ToolCallStartedEvent` | `tool-input-start` |
+| `ToolCallCompletedEvent` | `tool-input-available`, `tool-output-available` |
+
+See [Tasks/frontend_chat_integration.md](../Tasks/frontend_chat_integration.md) for frontend implementation details.
 
 ## Related Docs
 - [Database Schema](database_schema.md)
