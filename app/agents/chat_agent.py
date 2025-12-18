@@ -182,7 +182,7 @@ def create_chat_agent(*, instructions: Optional[str] = None) -> Agent:
     """Instantiate the Grok-powered StudyBuddy chat agent with custom retrieval."""
 
     if settings.openrouter_api_key:
-        model = OpenRouter(id="x-ai/grok-4.1-fast:free", api_key=settings.openrouter_api_key)
+        model = OpenRouter(id="x-ai/grok-4.1-fast", api_key=settings.openrouter_api_key)
     else:
         model = Gemini(id="gemini-2.5-pro")
 
