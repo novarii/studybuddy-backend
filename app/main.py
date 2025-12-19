@@ -352,6 +352,30 @@ async def delete_lecture(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
+@app.get("/api/courses/{course_id}/documents", response_model=list[DocumentDetailResponse])
+async def list_course_documents(
+    course_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: AuthenticatedUser = Depends(require_user),
+):
+    """List all documents for a course owned by the current user."""
+    documents = documents_service.list_documents_for_course(db, course_id, current_user.user_id)
+    return [
+        DocumentDetailResponse(
+            id=doc.id,
+            course_id=doc.course_id,
+            filename=doc.filename,
+            mime_type=doc.mime_type,
+            size_bytes=doc.size_bytes,
+            page_count=doc.page_count,
+            status=doc.status,
+            created_at=doc.created_at,
+            updated_at=doc.updated_at,
+        )
+        for doc in documents
+    ]
+
+
 @app.post("/api/documents/upload", response_model=DocumentUploadResponse)
 async def upload_document(
     response: Response,

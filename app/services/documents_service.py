@@ -69,6 +69,14 @@ class DocumentsService:
         db.commit()
         return document, created
 
+    def list_documents_for_course(self, db: Session, course_id: UUID, user_id: UUID) -> list[Document]:
+        """List all documents for a course owned by the user."""
+        stmt = select(Document).where(
+            Document.owner_id == user_id,
+            Document.course_id == course_id,
+        ).order_by(Document.created_at.desc())
+        return list(db.execute(stmt).scalars().all())
+
     def fetch_document_for_user(self, db: Session, document_id: UUID, user_id: UUID) -> Document:
         stmt = (
             select(Document)
