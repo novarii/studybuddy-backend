@@ -80,6 +80,7 @@ The delete endpoint now also calls `DocumentChunkPipeline.cleanup_document(...)`
 - `WHISPER_SERVER_IP`, `WHISPER_SERVER_PORT`, `WHISPER_REQUEST_TIMEOUT_SECONDS`, `WHISPER_POLL_INTERVAL_SECONDS`, `WHISPER_POLL_TIMEOUT_SECONDS` (remote transcription client)
 - `VOYAGE_API_KEY`, `VOYAGE_MODEL_ID`, `VOYAGE_EMBED_DIMENSIONS` (Voyage embedder used by Agno Knowledge).
 - `KNOWLEDGE_VECTOR_SCHEMA`, `SLIDE_KNOWLEDGE_TABLE`, `LECTURE_KNOWLEDGE_TABLE` (PgVector schema/table settings for slide/lecture knowledge stores).
+- `TEST_COURSE_ID`, `TEST_OWNER_ID` (optional, for AgentOS playground testing without auth).
 - Ensure directories `storage/documents/`, `storage/audio_tmp/`, and `storage/transcripts/` are writable (they are created lazily as needed).
 
 ## API Surface
@@ -104,16 +105,43 @@ All routes require a valid Clerk session token in the `Authorization` header or 
 The chat feature uses Agno agents with a custom RAG retriever and streams responses via a Vercel AI SDK v5-compatible adapter.
 
 ### Components
-- **`app/agents/chat_agent.py`**: Creates the `StudyBuddyChatAgent` with a `custom_retriever` that searches both slide and lecture knowledge bases.
+- **`app/agents/chat_agent.py`**: Creates the `StudyBuddyChatAgent` with retrieval functions. Also provides `create_test_chat_agent()` for AgentOS playground testing.
+- **`app/agents/context_formatter.py`**: Separates model context from client metadata. Produces lean numbered text for the LLM (`[1] (Slide 5) content...`) while preserving full metadata for the client.
 - **`app/agents/knowledge_builder.py`**: Factory for PgVector-backed `Knowledge` instances with Voyage AI embeddings.
 - **`app/adapters/vercel_stream.py`**: `AgnoVercelAdapter` class that converts Agno `RunEvent` stream to Vercel AI SDK v5 SSE format.
+
+### Lean Context Architecture
+The retrieval system separates what the model sees from what the client receives:
+
+**Model receives** (lean, numbered):
+```
+<references>
+[1] (Slide 5) Mitochondria convert glucose into ATP...
+
+[2] (Lecture @2:00) So today we're talking about energy...
+</references>
+```
+
+**Client receives** (rich metadata with `chunk_number` for citation linking):
+```json
+{
+  "chunk_number": 1,
+  "source_id": "slide-doc123-5",
+  "source_type": "slide",
+  "document_id": "doc123",
+  "slide_number": 5,
+  "content_preview": "..."
+}
+```
+
+The agent is instructed to cite sources as `[1]`, `[2]`, `[3]` which the frontend can correlate with source cards via `chunk_number`.
 
 ### Stream Format (Vercel AI SDK v5)
 The `/api/agent/chat` endpoint returns Server-Sent Events with header `x-vercel-ai-ui-message-stream: v1`:
 ```
 data: {"type":"start","messageId":"..."}
 data: {"type":"source-document","sourceId":"...","mediaType":"slide","title":"..."}
-data: {"type":"data-rag-source","data":{...full metadata...}}
+data: {"type":"data-rag-source","data":{...full metadata including chunk_number...}}
 data: {"type":"text-start","id":"..."}
 data: {"type":"text-delta","id":"...","delta":"Hello..."}
 data: {"type":"text-end","id":"..."}
@@ -123,8 +151,8 @@ data: [DONE]
 
 ### RAG Source Metadata
 Sources include full metadata for frontend deep-linking:
-- **Slides**: `document_id`, `slide_number`, `course_id`, `owner_id`
-- **Lectures**: `lecture_id`, `start_seconds`, `end_seconds`, `course_id`
+- **Slides**: `chunk_number`, `document_id`, `slide_number`, `course_id`, `owner_id`
+- **Lectures**: `chunk_number`, `lecture_id`, `start_seconds`, `end_seconds`, `course_id`
 
 ### Event Mapping (Agno → Vercel)
 | Agno Event | Vercel SSE Type |

@@ -55,6 +55,7 @@ interface RAGSource {
   source_id: string;           // Unique ID like "slide-docId-5" or "lecture-lecId-120"
   source_type: 'slide' | 'lecture';
   content_preview: string;     // First 200 chars of content
+  chunk_number: number;        // Citation number [1], [2], etc. for linking to response text
 
   // For slides
   document_id?: string;        // UUID of the PDF document
@@ -70,6 +71,27 @@ interface RAGSource {
   owner_id?: string;
   title?: string;              // Document/lecture title
 }
+```
+
+### Citation Linking
+
+The agent cites sources using numbered brackets: `[1]`, `[2]`, `[3]`. The `chunk_number` field in each `RAGSource` corresponds to these citations, allowing the frontend to:
+
+1. Display sources with their citation number: `[1] Slide 5 - Mitochondria`
+2. Make citations in the response text clickable/hoverable
+3. Highlight the corresponding source when a citation is clicked
+
+**Example response text:**
+```
+The mitochondria is the powerhouse of the cell [1]. This process is also covered in the lecture [2].
+```
+
+**Corresponding sources:**
+```json
+[
+  { "chunk_number": 1, "source_type": "slide", "slide_number": 5, ... },
+  { "chunk_number": 2, "source_type": "lecture", "start_seconds": 120, ... }
+]
 ```
 
 ---
@@ -91,6 +113,7 @@ export interface RAGSource {
   source_id: string;
   source_type: 'slide' | 'lecture';
   content_preview: string;
+  chunk_number: number;        // Citation number for [1], [2], etc.
   document_id?: string;
   slide_number?: number;
   lecture_id?: string;
@@ -274,18 +297,19 @@ export function SourcesPanel({ sources, isSearching, courseId }: SourcesPanelPro
 function SourceItem({ source, courseId }: { source: RAGSource; courseId: string }) {
   if (source.source_type === 'slide') {
     return (
-      <li className="text-sm">
+      <li className="text-sm" id={`source-${source.chunk_number}`}>
         <Link
           href={`/courses/${courseId}/documents/${source.document_id}?slide=${source.slide_number}`}
           className="text-blue-600 hover:underline flex items-center gap-1"
         >
+          <span className="font-semibold text-gray-700">[{source.chunk_number}]</span>
           <span>📄</span>
           <span>
             {source.title || 'Document'} - Slide {source.slide_number}
           </span>
         </Link>
         {source.content_preview && (
-          <p className="text-gray-500 text-xs truncate ml-5">
+          <p className="text-gray-500 text-xs truncate ml-8">
             {source.content_preview}
           </p>
         )}
@@ -296,18 +320,19 @@ function SourceItem({ source, courseId }: { source: RAGSource; courseId: string 
   if (source.source_type === 'lecture') {
     const timestamp = formatTimestamp(source.start_seconds);
     return (
-      <li className="text-sm">
+      <li className="text-sm" id={`source-${source.chunk_number}`}>
         <Link
           href={`/courses/${courseId}/lectures/${source.lecture_id}?t=${source.start_seconds}`}
           className="text-blue-600 hover:underline flex items-center gap-1"
         >
+          <span className="font-semibold text-gray-700">[{source.chunk_number}]</span>
           <span>🎥</span>
           <span>
             {source.title || 'Lecture'} @ {timestamp}
           </span>
         </Link>
         {source.content_preview && (
-          <p className="text-gray-500 text-xs truncate ml-5">
+          <p className="text-gray-500 text-xs truncate ml-8">
             {source.content_preview}
           </p>
         )}
@@ -521,6 +546,8 @@ NEXT_PUBLIC_API_URL=http://localhost:8000
 
 Backend implementation by: [Your Name]
 Files modified:
-- `app/adapters/vercel_stream.py` - SSE adapter
+- `app/adapters/vercel_stream.py` - SSE adapter with `RAGSource` (includes `chunk_number`)
+- `app/agents/context_formatter.py` - Lean context formatting with numbered citations
+- `app/agents/chat_agent.py` - Agent with citation-aware instructions
 - `app/main.py` - `/api/agent/chat` endpoint
 - `app/schemas/__init__.py` - `ChatRequest` model

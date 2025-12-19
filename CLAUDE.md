@@ -44,10 +44,6 @@ docker compose up -d db                    # Start PostgreSQL with pgvector
 ```bash
 # Development with hot-reload
 uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-
-# With CORS configured
-export CORS_ALLOW_ORIGINS="https://rochester.hosted.panopto.com"
-uvicorn app.main:app --reload
 ```
 
 ### Utility Scripts
