@@ -123,3 +123,18 @@ class UserLecture(Base):
 
     lecture = relationship("Lecture", back_populates="user_links")
 
+
+class UserCourse(Base):
+    __tablename__ = "user_courses"
+    __table_args__ = (Index("idx_user_courses_course_id", "course_id"),)
+
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    course_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("courses.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    course = relationship("Course")
+

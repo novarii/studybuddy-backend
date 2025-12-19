@@ -28,7 +28,7 @@ from .agents.chat_agent import create_chat_agent, create_test_chat_agent, retrie
 from .agents.context_formatter import format_retrieval_context
 from .core.config import settings
 from .database.db import SessionLocal, get_db
-from .database.models import Course, Lecture
+from .database.models import Course, Lecture, UserCourse
 from .schemas import (
     ChatRequest,
     CourseResponse,
@@ -156,6 +156,86 @@ async def list_courses(
         )
         for course in courses
     ]
+
+
+@app.get("/api/user/courses", response_model=list[CourseResponse])
+async def list_user_courses(
+    db: Session = Depends(get_db),
+    current_user: AuthenticatedUser = Depends(require_user),
+):
+    """Get all courses the current user has added."""
+    user_courses = (
+        db.execute(
+            select(Course)
+            .join(UserCourse, UserCourse.course_id == Course.id)
+            .where(UserCourse.user_id == current_user.user_id)
+            .order_by(Course.code)
+        )
+        .scalars()
+        .all()
+    )
+    return [
+        CourseResponse(
+            id=course.id,
+            code=course.code,
+            title=course.title,
+            instructor=course.instructor,
+        )
+        for course in user_courses
+    ]
+
+
+@app.post("/api/user/courses/{course_id}", status_code=status.HTTP_201_CREATED)
+async def add_user_course(
+    course_id: UUID,
+    response: Response,
+    db: Session = Depends(get_db),
+    current_user: AuthenticatedUser = Depends(require_user),
+):
+    """Add a course to the current user's list."""
+    # Verify course exists
+    course = db.execute(select(Course).where(Course.id == course_id)).scalar_one_or_none()
+    if not course:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Course not found")
+
+    # Check if already added
+    existing = db.execute(
+        select(UserCourse).where(
+            UserCourse.user_id == current_user.user_id,
+            UserCourse.course_id == course_id,
+        )
+    ).scalar_one_or_none()
+
+    if existing:
+        response.status_code = status.HTTP_200_OK
+        return {"message": "Course already added"}
+
+    user_course = UserCourse(user_id=current_user.user_id, course_id=course_id)
+    db.add(user_course)
+    db.commit()
+    return {"message": "Course added"}
+
+
+@app.delete("/api/user/courses/{course_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def remove_user_course(
+    course_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: AuthenticatedUser = Depends(require_user),
+):
+    """Remove a course from the current user's list."""
+    user_course = db.execute(
+        select(UserCourse).where(
+            UserCourse.user_id == current_user.user_id,
+            UserCourse.course_id == course_id,
+        )
+    ).scalar_one_or_none()
+
+    if not user_course:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Course not in user's list")
+
+    db.delete(user_course)
+    db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @app.post("/api/admin/courses/sync", response_model=CourseSyncResponse)
