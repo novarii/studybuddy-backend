@@ -83,3 +83,15 @@ class ChatRequest(BaseModel):
     document_id: Optional[UUID] = None
     lecture_id: Optional[UUID] = None
     session_id: Optional[str] = None
+
+
+class CourseSyncResponse(BaseModel):
+    """Response for POST /api/admin/courses/sync."""
+
+    created: int
+    updated: int
+    unchanged: int
+    deleted: int
+    total: int
+    terms: list[str]
+    deletion_skipped: bool
