@@ -63,19 +63,21 @@ Indexes:
 - `idx_user_lectures_lecture_id` (lecture → users lookup).
 
 ### courses
-Holds canonical course metadata.
+Holds canonical course metadata. Official courses are synced from CDCS catalog.
 
 | Column | Type | Notes |
 | --- | --- | --- |
 | id | UUID PK | `gen_random_uuid()` default. |
-| code | TEXT UNIQUE | e.g., `CSC 173`. |
-| title | TEXT | Full course title. |
-| instructor | TEXT nullable | Instructor name. |
-| is_official | BOOLEAN | Defaults to `false`, reserved for catalog validation. |
+| code | TEXT UNIQUE | e.g., `CSC 173`. Section suffixes stripped during sync. |
+| title | TEXT | Full course title from CDCS. |
+| instructor | TEXT nullable | Instructor name (not synced from CDCS). |
+| is_official | BOOLEAN | `true` for CDCS-synced courses, `false` for user-created. |
 | created_at / updated_at | TIMESTAMPTZ | Timestamps with auto-update trigger. |
 
 Indexes:
-- `uq_courses_code` keeps codes unique for now.
+- `uq_courses_code` keeps codes unique.
+
+**Sync behavior**: The `CourseSyncService` populates this table from CDCS XML endpoint. Courses with `is_official=true` that are no longer in CDCS are deleted (with safety threshold check).
 
 ### users
 Minimal table to satisfy foreign keys and cascading cleanup (id + timestamps). Rows are inserted lazily via `ensure_user_exists` whenever a user uploads data.

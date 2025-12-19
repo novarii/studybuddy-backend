@@ -14,8 +14,6 @@ This folder hosts all knowledge required to work on StudyBuddy Backend. Start he
 - `.agent/Tasks/` — Product requirements & implementation plans per feature (see file names for scope).
   - [Tasks/frontend_chat_integration.md](Tasks/frontend_chat_integration.md) — **Frontend handoff**: Next.js + Vercel AI SDK v5 integration for the streaming chat endpoint.
   - [Tasks/ai_sdk_nextjs_bridge_plan.md](Tasks/ai_sdk_nextjs_bridge_plan.md) — High-level plan for AI SDK UI → Next.js → Agno bridge architecture.
-  - [Tasks/pdf_vector_pipeline_plan.md](Tasks/pdf_vector_pipeline_plan.md) — Plan for hashing slides, AI descriptions, custom chunking, and embedding ingestion.
-  - [Tasks/studybuddy_initial_phase.md](Tasks/studybuddy_initial_phase.md) — Initial project phase planning.
   - [Tasks/audio_only_downloads_with_auth.md](Tasks/audio_only_downloads_with_auth.md) — Audio-only download requirements with authentication.
   - [Tasks/codebase_cleanup_plan.md](Tasks/codebase_cleanup_plan.md) — Codebase cleanup and refactoring plan.
   - [Tasks/critical_security_fixes_handoff.md](Tasks/critical_security_fixes_handoff.md) — Security fixes handoff document.
@@ -34,5 +32,6 @@ This folder hosts all knowledge required to work on StudyBuddy Backend. Start he
 ## Utilities
 - `scripts/run_migrations.sh` — Apply all SQL migrations sequentially (run after `docker compose up -d db`).
 - `scripts/test_transcription.py` — Manually upload a local `.m4a` file to the configured Whisper server to validate connectivity/polling.
+- `scripts/sync_courses.py` — Sync official courses from CDCS catalog (`--dry-run` to preview, `--terms` to specify semesters).
 
 Keep this index updated whenever new documentation is added or reorganized.

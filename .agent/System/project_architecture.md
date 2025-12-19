@@ -9,7 +9,7 @@ StudyBuddy Backend is a FastAPI service that orchestrates Panopto lecture audio 
 - **Database**: PostgreSQL accessed through SQLAlchemy ORM (`app/database/db.py`, `app/database/models.py`).
 - **Storage abstraction**: `app/storage/__init__.py` exposes `StorageBackend` and `LocalStorageBackend` for filesystem persistence (default root `storage/`).
 - **Download/transcription pipeline**: `app/services/downloaders/downloader.py` defines downloader/extractor interfaces, `app/services/downloaders/panopto_downloader.py` wraps the PanoptoDownloader package, and `app/services/transcription_service.py` integrates with a remote Whisper FastAPI server.
-- **Services**: `app/services/lectures_service.py`, `app/services/documents_service.py`, and `app/services/users_service.py` handle business logic, deduplication, orchestration, and cleanup.
+- **Services**: `app/services/lectures_service.py`, `app/services/documents_service.py`, `app/services/users_service.py`, and `app/services/course_sync_service.py` handle business logic, deduplication, orchestration, and cleanup.
 - **Config**: `app/core/config.py` centralizes environment-driven settings (database URL, storage roots/prefixes, Clerk, Whisper server, etc.).
 - **Migrations**: SQL files under `migrations/versions/` contain schema setup. `scripts/run_migrations.sh` pipes them into the Dockerized Postgres instance in order for quick resets.
 
@@ -24,6 +24,7 @@ app/
   mcp/                        # MCP server exposing knowledge retrieval as tools
   schemas/                    # Pydantic request/response models
   services/
+    course_sync_service.py    # CDCS catalog sync (scrapes official courses)
     documents_service.py      # PDF upload + dedup + user linking
     lectures_service.py       # Lecture ingestion, Panopto + Whisper pipelines
     users_service.py          # Lazy user row creation
@@ -66,6 +67,32 @@ The delete endpoint now also calls `DocumentChunkPipeline.cleanup_document(...)`
 - Lecture access remains in `user_lectures`; deleting the final link destroys the lecture and attached audio assets.
 - Documents are truly single-owner; `documents.owner_id` holds the FK and deleting the doc removes the file immediately.
 
+### Course Catalog Sync
+Official course data is scraped from University of Rochester's CDCS (Course Description Course Schedule) system.
+
+1. **Data Source**: `https://cdcs.ur.rochester.edu/XMLQuery.aspx?id=XML&term=Fall%202025&type=Lecture`
+2. **CourseSyncService** (`app/services/course_sync_service.py`):
+   - Fetches XML for Fall + Spring terms
+   - Parses `<cn>` (course code) and `<title>` elements
+   - Strips section suffixes: `CSC 171-1` → `CSC 171`, `ACC 401-FA.MB` → `ACC 401`
+   - Deduplicates across terms by course code
+3. **Full Reconciliation**:
+   - Creates new courses with `is_official=true`
+   - Updates titles if changed
+   - Deletes stale official courses no longer in CDCS
+4. **Safety Threshold**: If scraped count < 80% of existing official courses, deletion is skipped (protects against CDCS errors)
+
+**Usage**:
+```bash
+# CLI
+uv run python scripts/sync_courses.py              # Sync Fall+Spring 2025
+uv run python scripts/sync_courses.py --dry-run    # Preview changes
+uv run python scripts/sync_courses.py --terms "Fall 2025"  # Specific term
+
+# API (admin only)
+POST /api/admin/courses/sync
+```
+
 ## Background Tasks & External Dependencies
 - **Panopto downloads**: `requests` library pulls video bytes over HTTP. Actual Panopto auth/tokenization must be supplied by upstream callers.
 - **Audio extraction**: `ffmpeg`/`ffprobe` binaries must be available on the host; extractor falls back to copying the video file if `ffmpeg` is missing (still flagged as success but without transcoding guarantees).
@@ -86,7 +113,8 @@ The delete endpoint now also calls `DocumentChunkPipeline.cleanup_document(...)`
 ## API Surface
 | Method | Path | Description |
 | --- | --- | --- |
-| GET | `/api/courses` | Lists courses owned by the authenticated user (now backed by DB rows). |
+| GET | `/api/courses` | Lists all courses (official catalog + user-created). |
+| POST | `/api/admin/courses/sync` | **Admin only**: Sync courses from CDCS catalog. |
 | POST | `/api/lectures/download` | Create/queue a lecture download job (idempotent per course/session). |
 | GET | `/api/lectures/{lecture_id}` | Full lecture metadata for linked user. |
 | GET | `/api/lectures/{lecture_id}/status` | Compact status view (lectures). |
