@@ -32,6 +32,7 @@ from .database.models import Course, Lecture
 from .schemas import (
     ChatRequest,
     CourseResponse,
+    CourseSyncResponse,
     DocumentDetailResponse,
     DocumentUploadResponse,
     LectureDetailResponse,
@@ -40,6 +41,7 @@ from .schemas import (
     LectureStatusListItem,
     LectureStatusResponse,
 )
+from .services.course_sync_service import CourseSyncService
 from .services.document_chunk_pipeline import DocumentChunkPipeline, DocumentChunkPipelineError
 from .services.documents_service import DocumentsService
 from .services.downloaders.downloader import FFmpegAudioExtractor
@@ -83,6 +85,7 @@ lectures_service = LecturesService(
 )
 documents_service = DocumentsService(storage_backend)
 document_chunk_pipeline = DocumentChunkPipeline(storage_backend)
+course_sync_service = CourseSyncService()
 
 logger = logging.getLogger(__name__)
 
@@ -153,6 +156,36 @@ async def list_courses(
         )
         for course in courses
     ]
+
+
+@app.post("/api/admin/courses/sync", response_model=CourseSyncResponse)
+async def sync_courses_from_catalog(
+    db: Session = Depends(get_db),
+    current_user: AuthenticatedUser = Depends(require_user),
+):
+    """
+    Sync courses from CDCS catalog (admin only).
+
+    Fetches lecture-type courses from University of Rochester CDCS
+    for Fall 2025 and Spring 2025, deduplicates by course code,
+    and upserts into the courses table with is_official=true.
+    """
+    if current_user.user_id not in settings.admin_user_ids:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required",
+        )
+
+    result = course_sync_service.sync_courses(db)
+    return CourseSyncResponse(
+        created=result.created,
+        updated=result.updated,
+        unchanged=result.unchanged,
+        deleted=result.deleted,
+        total=result.total,
+        terms=result.terms,
+        deletion_skipped=result.deletion_skipped,
+    )
 
 
 @app.post("/api/lectures/download", response_model=LectureDownloadResponse)
