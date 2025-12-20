@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from urllib.parse import quote
 from uuid import UUID
 
 from fastapi import (
@@ -455,8 +456,10 @@ async def download_document_file(
         file_stream = storage_backend.open_file(document.storage_key)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Stored file not found") from exc
+    # Use RFC 5987 encoding to prevent header injection from malicious filenames
+    safe_filename = quote(document.filename, safe='')
     headers = {
-        "Content-Disposition": f'attachment; filename="{document.filename}"'
+        "Content-Disposition": f"attachment; filename*=UTF-8''{safe_filename}"
     }
     return StreamingResponse(file_stream, media_type=document.mime_type, headers=headers)
 
