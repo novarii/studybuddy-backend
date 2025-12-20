@@ -392,7 +392,21 @@ async def upload_document(
     if file.content_type not in {"application/pdf", "application/x-pdf", "application/octet-stream"}:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid PDF content type")
 
-    file_bytes = await file.read()
+    # Enforce 50MB file size limit
+    max_file_size = 50 * 1024 * 1024  # 50 MB
+    if file.size is not None and file.size > max_file_size:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"File too large. Maximum size is {max_file_size // (1024 * 1024)} MB",
+        )
+
+    # Read file with size limit to prevent memory exhaustion
+    file_bytes = await file.read(max_file_size + 1)
+    if len(file_bytes) > max_file_size:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"File too large. Maximum size is {max_file_size // (1024 * 1024)} MB",
+        )
     document, created = documents_service.upload_document(
         db,
         course_id=course_id,
