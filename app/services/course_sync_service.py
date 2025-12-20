@@ -53,7 +53,7 @@ class CourseSyncService:
             course_type: Course type filter (default: "Lecture")
 
         Returns:
-            List of dicts with 'code' and 'title' keys
+            List of dicts with 'code', 'title', and 'instructor' keys
         """
         url = f"{self.CDCS_BASE_URL}?id=XML&term={quote(term)}&type={quote(course_type)}"
 
@@ -66,6 +66,7 @@ class CourseSyncService:
         for course_elem in root.findall("course"):
             cn_elem = course_elem.find("cn")
             title_elem = course_elem.find("title")
+            instructors_elem = course_elem.find("instructors")
 
             if cn_elem is None or cn_elem.text is None:
                 continue
@@ -80,7 +81,12 @@ class CourseSyncService:
 
             title = title_elem.text.strip()
 
-            courses.append({"code": code, "title": title})
+            # Extract instructor(s) - may be semicolon-separated for multiple instructors
+            instructor = None
+            if instructors_elem is not None and instructors_elem.text:
+                instructor = instructors_elem.text.strip()
+
+            courses.append({"code": code, "title": title, "instructor": instructor})
 
         return courses
 
@@ -107,14 +113,27 @@ class CourseSyncService:
             terms = self.DEFAULT_TERMS
 
         # Fetch and deduplicate courses across all terms
-        all_courses: dict[str, str] = {}
+        # Store title and set of instructors for each course code
+        all_courses: dict[str, dict] = {}
         for term in terms:
             fetched = self.fetch_courses_from_cdcs(term, course_type)
             for course in fetched:
                 code = course["code"]
-                # Keep first occurrence (or could prefer longer title)
+                instructor = course.get("instructor")
+
                 if code not in all_courses:
-                    all_courses[code] = course["title"]
+                    all_courses[code] = {
+                        "title": course["title"],
+                        "instructors": set(),
+                    }
+
+                # Collect all unique instructors across sections
+                # Instructors may be semicolon-separated (e.g., "John Doe; Jane Smith")
+                if instructor:
+                    for name in instructor.split(";"):
+                        name = name.strip()
+                        if name:
+                            all_courses[code]["instructors"].add(name)
 
         # Fetch existing courses from database
         existing_courses = {
@@ -131,12 +150,22 @@ class CourseSyncService:
         deletion_skipped = False
 
         # Upsert courses from CDCS
-        for code, title in all_courses.items():
+        for code, data in all_courses.items():
+            title = data["title"]
+            # Join instructors with semicolon, sorted for consistency
+            instructor = "; ".join(sorted(data["instructors"])) if data["instructors"] else None
+
             if code in existing_courses:
                 course = existing_courses[code]
                 # Check if update needed
-                if course.title != title or not course.is_official:
+                needs_update = (
+                    course.title != title
+                    or course.instructor != instructor
+                    or not course.is_official
+                )
+                if needs_update:
                     course.title = title
+                    course.instructor = instructor
                     course.is_official = True
                     updated += 1
                 else:
@@ -146,6 +175,7 @@ class CourseSyncService:
                 new_course = Course(
                     code=code,
                     title=title,
+                    instructor=instructor,
                     is_official=True,
                 )
                 db.add(new_course)
