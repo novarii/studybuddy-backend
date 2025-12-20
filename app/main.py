@@ -121,8 +121,12 @@ async def health_check():
 
 
 @app.get("/api/dev/lectures", response_model=list[LectureStatusListItem])
-async def list_dev_lectures(db: Session = Depends(get_db)):
-    if not settings.dev_routes_enabled:
+async def list_dev_lectures(
+    db: Session = Depends(get_db),
+    current_user: AuthenticatedUser = Depends(require_user),
+):
+    # Defense in depth: require both dev routes enabled AND admin user
+    if not settings.dev_routes_enabled or current_user.user_id not in settings.admin_user_ids:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
 
     lectures = (
