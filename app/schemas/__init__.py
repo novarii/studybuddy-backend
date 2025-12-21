@@ -95,3 +95,20 @@ class CourseSyncResponse(BaseModel):
     total: int
     terms: list[str]
     deletion_skipped: bool
+
+
+class LectureAudioUploadMetadata(BaseModel):
+    """Metadata for direct audio upload from browser extension."""
+
+    session_id: constr(strip_whitespace=True, min_length=1)
+    course_id: UUID
+    title: Optional[str] = None
+    duration: Optional[float] = None
+
+
+class LectureAudioUploadResponse(BaseModel):
+    """Response for POST /api/lectures/audio."""
+
+    lecture_id: UUID
+    status: LectureStatus
+    created: bool

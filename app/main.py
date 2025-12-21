@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 from urllib.parse import quote
 from uuid import UUID
@@ -36,6 +37,8 @@ from .schemas import (
     CourseSyncResponse,
     DocumentDetailResponse,
     DocumentUploadResponse,
+    LectureAudioUploadMetadata,
+    LectureAudioUploadResponse,
     LectureDetailResponse,
     LectureDownloadRequest,
     LectureDownloadResponse,
@@ -281,6 +284,13 @@ async def trigger_lecture_download(
     db: Session = Depends(get_db),
     current_user: AuthenticatedUser = Depends(require_user),
 ):
+    """
+    Fallback endpoint for lecture download via CloudFront HLS URL.
+
+    Used when the browser extension cannot fetch audio directly from Panopto's
+    audioPodcast endpoint (e.g., encoding not complete, auth issues).
+    """
+    logger.info("Lecture upload via CloudFront (fallback)")
     try:
         lecture, created = lectures_service.request_download(
             db,
@@ -293,6 +303,79 @@ async def trigger_lecture_download(
 
     response.status_code = status.HTTP_201_CREATED if created else status.HTTP_200_OK
     return LectureDownloadResponse(lecture_id=lecture.id, status=lecture.status)
+
+
+@app.post("/api/lectures/audio", response_model=LectureAudioUploadResponse)
+async def upload_lecture_audio(
+    background_tasks: BackgroundTasks,
+    audio: UploadFile = File(...),
+    metadata: str = Form(...),
+    db: Session = Depends(get_db),
+    current_user: AuthenticatedUser = Depends(require_user),
+):
+    """
+    Primary endpoint for direct audio upload from browser extension.
+
+    This is the preferred path when the extension can fetch audio directly
+    from Panopto's audioPodcast endpoint (~75MB vs ~500MB video download).
+
+    Args:
+        audio: M4A/MP4 audio file from Panopto audioPodcast endpoint
+        metadata: JSON string with session_id, course_id, title, duration
+    """
+    # Parse and validate metadata
+    try:
+        meta_dict = json.loads(metadata)
+        meta = LectureAudioUploadMetadata(**meta_dict)
+    except (json.JSONDecodeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid metadata: {exc}",
+        ) from exc
+
+    # Validate audio file
+    if not audio.filename:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Audio file must have a filename",
+        )
+
+    content_type = audio.content_type or ""
+    if not content_type.startswith(("audio/", "video/mp4", "application/octet-stream")):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid audio content type: {content_type}",
+        )
+
+    # Enforce 100MB file size limit for audio
+    max_file_size = 100 * 1024 * 1024  # 100 MB
+    if audio.size is not None and audio.size > max_file_size:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"Audio file too large. Maximum size is {max_file_size // (1024 * 1024)} MB",
+        )
+
+    # Read audio file with size limit
+    audio_bytes = await audio.read(max_file_size + 1)
+    if len(audio_bytes) > max_file_size:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"Audio file too large. Maximum size is {max_file_size // (1024 * 1024)} MB",
+        )
+
+    lecture, created = lectures_service.upload_audio(
+        db,
+        metadata=meta,
+        audio_bytes=audio_bytes,
+        user_id=current_user.user_id,
+        background_tasks=background_tasks,
+    )
+
+    return LectureAudioUploadResponse(
+        lecture_id=lecture.id,
+        status=lecture.status,
+        created=created,
+    )
 
 
 @app.get("/api/lectures/{lecture_id}", response_model=LectureDetailResponse)

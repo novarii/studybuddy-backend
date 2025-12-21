@@ -40,17 +40,36 @@ storage/                      # Local asset roots (documents/, audio_tmp/, trans
 ```
 
 ## Core Flows
-### Lecture Download & Transcription
-1. Client POSTs to `/api/lectures/download` with `course_id`, `panopto_url` (viewer link), `stream_url` (direct podcast URL), optional `title` (`app/main.py`).
+### Lecture Ingestion (Two Paths)
+
+The system supports two paths for lecture ingestion, with the browser extension choosing the appropriate one:
+
+#### Primary Path: Direct Audio Upload (`/api/lectures/audio`)
+1. Browser extension fetches audio directly from Panopto's audioPodcast endpoint (~75MB).
+2. Client POSTs to `/api/lectures/audio` with multipart form data:
+   - `audio`: M4A/MP4 audio file
+   - `metadata`: JSON with `session_id`, `course_id`, `title`, `duration`
+3. `LecturesService.upload_audio(...)` saves audio directly to `audio/{lecture_id}.m4a`, creates lecture record.
+4. Background task `_run_audio_pipeline` runs transcription only (no ffmpeg needed).
+5. Benefits: ~75MB client download vs ~500MB server download, no ffmpeg processing.
+
+#### Fallback Path: CloudFront HLS Download (`/api/lectures/download`)
+Used when audioPodcast is unavailable (encoding incomplete, auth issues).
+1. Client POSTs to `/api/lectures/download` with `course_id`, `panopto_url`, `stream_url`, optional `title`.
 2. `LecturesService.request_download(...)` checks `(course_id, panopto_session_id)` for duplicates, links the user, and enqueues `_run_download_pipeline` via FastAPI `BackgroundTasks`.
 3. Pipeline (`app/lectures_service.py`):
    - Marks lecture as `downloading`.
-   - Uses `PanoptoPackageDownloader` to stream the direct podcast URL into temporary storage key `audio_tmp/{lecture_id}_source.mp4` via `StorageBackend`.
-   - Converts to audio with `FFmpegAudioExtractor`, writing `audio/{lecture_id}.m4a` via storage.
-   - If Whisper configuration is present, `WhisperTranscriptionClient` uploads the audio to the remote FastAPI server (`/transcribe`), polls `/result/{task_id}`, and returns structured text + segments + VTT metadata. The full payload is stored at `transcripts/{lecture_id}.json` (and `transcripts/{lecture_id}.vtt` when provided).
-   - Updates `duration_seconds`, keeps audio/transcript keys, deletes temporary video file, and marks status `completed`.
-   - Failures delete the lecture row entirely and remove any stored assets to avoid stale data.
-4. Metadata is accessible via `GET /api/lectures/{id}` and `GET /api/lectures/{id}/status`, which verify user linkage.
+   - Uses `PanoptoPackageDownloader` to stream the video URL into temporary storage key `audio_tmp/{lecture_id}_source.mp4` (~500MB).
+   - Converts to audio with `FFmpegAudioExtractor`, writing `audio/{lecture_id}.m4a`.
+   - Runs Whisper transcription and stores results.
+   - Deletes temporary video file, marks status `completed`.
+4. Failures delete the lecture row entirely and remove any stored assets.
+
+#### Transcription Pipeline (Both Paths)
+- If Whisper configuration is present, `WhisperTranscriptionClient` uploads the audio to the remote FastAPI server (`/transcribe`), polls `/result/{task_id}`, and returns structured text + segments + VTT metadata.
+- The full payload is stored at `transcripts/{lecture_id}.json` (and `transcripts/{lecture_id}.vtt` when provided).
+- `LectureChunkPipeline` processes transcript segments into ~180-second chunks for knowledge base ingestion.
+- Metadata is accessible via `GET /api/lectures/{id}` and `GET /api/lectures/{id}/status`, which verify user linkage.
 
 ### Document Upload
 1. Client POSTs `/api/documents/upload` with multipart PDF `file`, `course_id`, `user_id` (`app/main.py`).
@@ -115,7 +134,8 @@ POST /api/admin/courses/sync
 | --- | --- | --- |
 | GET | `/api/courses` | Lists all courses (official catalog + user-created). |
 | POST | `/api/admin/courses/sync` | **Admin only**: Sync courses from CDCS catalog. |
-| POST | `/api/lectures/download` | Create/queue a lecture download job (idempotent per course/session). |
+| POST | `/api/lectures/audio` | **Primary**: Direct audio upload from browser extension (~75MB). |
+| POST | `/api/lectures/download` | **Fallback**: Queue lecture download from CloudFront HLS URL (~500MB). |
 | GET | `/api/lectures/{lecture_id}` | Full lecture metadata for linked user. |
 | GET | `/api/lectures/{lecture_id}/status` | Compact status view (lectures). |
 | DELETE | `/api/lectures/{lecture_id}` | Remove user association or, for admins, hard-delete the lecture. |
