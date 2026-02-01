@@ -251,6 +251,21 @@ class LecturesService:
         finally:
             db.close()
 
+    def list_lectures_for_course(
+        self, db: Session, course_id: UUID, user_id: UUID
+    ) -> list[Lecture]:
+        """List all lectures for a course that the user has access to."""
+        stmt = (
+            select(Lecture)
+            .join(UserLecture, UserLecture.lecture_id == Lecture.id)
+            .where(
+                UserLecture.user_id == user_id,
+                Lecture.course_id == course_id,
+            )
+            .order_by(Lecture.created_at.desc())
+        )
+        return list(db.execute(stmt).scalars().all())
+
     def fetch_lecture_for_user(self, db: Session, lecture_id: UUID, user_id: UUID) -> Lecture:
         stmt = (
             select(Lecture)

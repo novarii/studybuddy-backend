@@ -472,6 +472,32 @@ async def list_course_documents(
     ]
 
 
+@app.get("/api/courses/{course_id}/lectures", response_model=list[LectureDetailResponse])
+async def list_course_lectures(
+    course_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: AuthenticatedUser = Depends(require_user),
+):
+    """List all lectures for a course that the user has access to."""
+    lectures = lectures_service.list_lectures_for_course(db, course_id, current_user.user_id)
+    return [
+        LectureDetailResponse(
+            id=lecture.id,
+            course_id=lecture.course_id,
+            panopto_session_id=lecture.panopto_session_id,
+            panopto_url=lecture.panopto_url,
+            stream_url=lecture.stream_url,
+            title=lecture.title,
+            duration_seconds=lecture.duration_seconds,
+            status=lecture.status,
+            error_message=lecture.error_message,
+            created_at=lecture.created_at,
+            updated_at=lecture.updated_at,
+        )
+        for lecture in lectures
+    ]
+
+
 @app.post("/api/documents/upload", response_model=DocumentUploadResponse)
 async def upload_document(
     response: Response,
