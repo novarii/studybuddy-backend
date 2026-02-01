@@ -11,8 +11,10 @@ from agno.knowledge import Knowledge
 from agno.knowledge.document import Document
 from agno.models.google import Gemini
 from agno.models.openrouter import OpenRouter
+from agno.tools import tool
 
 from ..core.config import settings
+from .context_formatter import format_retrieval_context
 from .knowledge_builder import get_lecture_knowledge, get_slide_knowledge
 
 logger = logging.getLogger(__name__)
@@ -45,15 +47,25 @@ ReferenceType = Union[Dict[str, Any], str]
 DEFAULT_INSTRUCTIONS = """
 You are StudyBuddy, a friendly course companion that helps students understand their lecture materials.
 
-You have access to the student's lecture transcripts and slide decks through the course material retrieval tool. Use it when the student asks questions about course content, concepts, or needs help studying.
+You have access to the `search_course_materials` tool to search the student's lecture transcripts and slide decks. Use it when the student asks questions about course content, concepts, or needs help studying.
 
-WHEN USING COURSE MATERIALS:
+WHEN TO USE THE SEARCH TOOL:
+- Questions about course content, concepts, or topics covered in lectures/slides
+- Requests to explain or clarify material from class
+- Study help or review questions
+- When the student references specific lectures or slides
+
+WHEN NOT TO USE THE SEARCH TOOL:
+- Casual conversation, greetings, or thank-yous
+- General knowledge questions unrelated to the course
+- Follow-up questions where you already have the relevant context
+- Clarifying questions about your previous response
+
+WHEN CITING COURSE MATERIALS:
 - Cite reference numbers in brackets after claims: "The mitochondria is the powerhouse of the cell [2]."
 - You may cite multiple sources: "This concept appears in both the slides [1] and lecture [3]."
 - Point students to specific slides or lecture segments worth reviewing.
-- If the references don't contain relevant information, say so and help however you can.
-
-You don't need to look up materials for casual conversation, greetings, or general questions unrelated to the course content.
+- If the search returns no relevant information, say so and help however you can.
 """.strip()
 
 
@@ -167,6 +179,51 @@ def retrieve_documents(
     return references
 
 
+def create_search_tool(
+    owner_id: Union[str, UUID],
+    course_id: Union[str, UUID],
+    document_id: Union[str, UUID, None] = None,
+    lecture_id: Union[str, UUID, None] = None,
+):
+    """
+    Create a search_course_materials tool with the given context baked in.
+
+    The tool is created at request time with the user's owner_id and course_id
+    so the agent can search without needing to know these identifiers.
+    """
+
+    @tool(
+        name="search_course_materials",
+        description="Search the student's course materials (lecture transcripts and slide decks) for information relevant to their question.",
+    )
+    def search_course_materials(query: str) -> str:
+        """
+        Search course materials for relevant information.
+
+        Args:
+            query: The search query describing what information to find.
+
+        Returns:
+            Formatted references from lectures and slides, numbered for citation.
+        """
+        raw_references = retrieve_documents(
+            query=query,
+            num_documents=5,
+            owner_id=owner_id,
+            course_id=course_id,
+            document_id=document_id,
+            lecture_id=lecture_id,
+        )
+
+        if not raw_references:
+            return "No relevant course materials found for this query."
+
+        formatted = format_retrieval_context(raw_references, order_by="chronological")
+        return formatted.model_context or "No relevant course materials found for this query."
+
+    return search_course_materials
+
+
 def custom_retriever(
     agent: Agent,
     query: str,
@@ -184,6 +241,9 @@ def custom_retriever(
 
     The caller can optionally provide course/owner identifiers which we merge into
     the metadata filters so the vector search only touches documents the user owns.
+
+    Note: This is kept for backwards compatibility but the preferred approach is
+    to use create_search_tool() which gives the agent control over when to search.
     """
 
     owner_lookup = owner_id or agent.user_id
@@ -208,6 +268,7 @@ def create_chat_agent(
     *,
     instructions: Optional[str] = None,
     db: Optional[PostgresDb] = None,
+    tools: Optional[List[Any]] = None,
 ) -> Agent:
     """Instantiate the StudyBuddy chat agent.
 
@@ -215,11 +276,8 @@ def create_chat_agent(
         instructions: Optional custom instructions for the agent.
         db: Optional PostgresDb instance for session persistence.
             When provided, enables multi-turn conversation history.
-
-    Note: This agent does not use automatic knowledge retrieval. Instead,
-    the chat endpoint pre-retrieves references and injects a lean, numbered
-    context directly into the user message. This reduces token usage by
-    excluding metadata that the model doesn't need.
+        tools: Optional list of tools to give the agent. Use create_search_tool()
+            to create a context-aware search tool for the current request.
     """
 
     if settings.openrouter_api_key:
@@ -231,13 +289,11 @@ def create_chat_agent(
         name="StudyBuddyChatAgent",
         model=model,
         instructions=instructions or DEFAULT_INSTRUCTIONS,
+        tools=tools or [],
         # Session persistence (enabled when db is provided)
         db=db,
         add_history_to_context=db is not None,  # Include previous messages in context
         num_history_runs=10,  # Number of previous turns to include
-        # Knowledge retrieval settings
-        search_knowledge=True,
-        add_knowledge_to_context=False,  # Context injected manually via formatted references
         markdown=True,
     )
 
@@ -286,4 +342,4 @@ def create_test_chat_agent() -> Agent:
     )
 
 
-__all__ = ["create_chat_agent", "custom_retriever", "create_test_chat_agent", "get_agno_db"]
+__all__ = ["create_chat_agent", "create_search_tool", "custom_retriever", "create_test_chat_agent", "get_agno_db", "retrieve_documents"]

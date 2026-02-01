@@ -29,8 +29,7 @@ from agno.os import AgentOS
 
 from .adapters import AgnoVercelAdapter, get_vercel_stream_headers
 from .api.auth import AuthenticatedUser, require_user
-from .agents.chat_agent import create_chat_agent, create_test_chat_agent, get_agno_db, retrieve_documents
-from .agents.context_formatter import format_retrieval_context
+from .agents.chat_agent import create_chat_agent, create_search_tool, create_test_chat_agent, get_agno_db
 from .core.config import settings
 from .database.db import SessionLocal, get_db
 from .database.models import Course, Lecture, UserCourse
@@ -601,68 +600,39 @@ async def chat_stream(
     Streaming chat endpoint compatible with Vercel AI SDK v5.
 
     Returns Server-Sent Events in the Vercel UI Message Stream format.
-    Sources are emitted BEFORE text begins for "searching..." UI states.
 
-    The response includes:
-    - RAG sources with full metadata (document_id, lecture_id, slide_number, timestamps)
-      plus chunk_number for correlating citations like [1], [2] in the response
-    - Streaming text deltas
-    - Reasoning steps (if model provides them)
-    - Tool calls (if agent uses tools)
-
-    The model receives a lean, numbered context (no metadata bloat), while the
-    client receives rich metadata for UI rendering.
+    The agent has access to a search_course_materials tool that it can use
+    to search the student's lecture transcripts and slide decks when needed.
+    The agent decides when to use the tool based on the user's question.
     """
 
     async def generate_stream():
         adapter = AgnoVercelAdapter()
 
         try:
-            # 1. Retrieve raw references
-            raw_references = []
-            try:
-                raw_references = retrieve_documents(
-                    query=payload.message,
-                    owner_id=current_user.user_id,
-                    course_id=payload.course_id,
-                    document_id=payload.document_id,
-                    lecture_id=payload.lecture_id,
-                )
-            except Exception as e:
-                logger.warning("Pre-retrieval failed: %s", e)
-
-            # 2. Format into lean model context + rich client sources
-            formatted = format_retrieval_context(raw_references, order_by="chronological")
-
-            # 3. Extract sources with chunk_number for client
-            pre_sources = adapter.extract_sources_from_references(formatted.client_sources)
-
-            # 4. Build user message with lean context injected
-            if formatted.model_context:
-                user_message = (
-                    f"{payload.message}\n\n"
-                    f"<references>\n{formatted.model_context}\n</references>"
-                )
-            else:
-                user_message = payload.message
-
-            # 5. Create agent with persistence and run with streaming
-            agno_db = get_agno_db()
-            agent = create_chat_agent(db=agno_db)
-            stream = agent.run(
-                input=user_message,
-                stream=True,
-                stream_events=True,
-                session_id=payload.session_id,  # Agno auto-generates if None
-                user_id=str(current_user.user_id),
-                metadata={"course_id": str(payload.course_id)},  # Store course_id with session
+            # Create search tool with user's context
+            search_tool = create_search_tool(
+                owner_id=current_user.user_id,
+                course_id=payload.course_id,
+                document_id=payload.document_id,
+                lecture_id=payload.lecture_id,
             )
 
-            # 6. Transform Agno stream to Vercel format
-            for chunk in adapter.transform_stream_sync(
-                stream,
-                pre_retrieved_sources=pre_sources,
-            ):
+            # Create agent with persistence and search tool
+            agno_db = get_agno_db()
+            agent = create_chat_agent(db=agno_db, tools=[search_tool])
+
+            stream = agent.run(
+                input=payload.message,
+                stream=True,
+                stream_events=True,
+                session_id=payload.session_id,
+                user_id=str(current_user.user_id),
+                session_state={"course_id": str(payload.course_id)},
+            )
+
+            # Transform Agno stream to Vercel format
+            for chunk in adapter.transform_stream_sync(stream):
                 yield chunk
 
         except Exception as e:
@@ -700,19 +670,20 @@ async def list_sessions(
     # Query the agno_sessions table directly
     with agno_db.Session() as db_session:
         # Build query with optional course_id filter
+        # course_id is stored in session_data->'session_state'->>'course_id'
         if course_id:
             query = text("""
                 SELECT session_id, session_data, metadata, created_at, updated_at
                 FROM ai.agno_sessions
                 WHERE user_id = :user_id
-                AND metadata->>'course_id' = :course_id
+                AND session_data->'session_state'->>'course_id' = :course_id
                 ORDER BY updated_at DESC
                 LIMIT :limit OFFSET :offset
             """)
             count_query = text("""
                 SELECT COUNT(*) FROM ai.agno_sessions
                 WHERE user_id = :user_id
-                AND metadata->>'course_id' = :course_id
+                AND session_data->'session_state'->>'course_id' = :course_id
             """)
             params = {"user_id": user_id_str, "course_id": str(course_id), "limit": limit, "offset": offset}
         else:
@@ -741,11 +712,11 @@ async def list_sessions(
     sessions = []
     for row in rows:
         session_data = row.session_data or {}
-        metadata = row.metadata or {}
+        session_state = session_data.get("session_state", {})
         sessions.append(SessionResponse(
             session_id=row.session_id,
             session_name=session_data.get("session_name"),
-            course_id=metadata.get("course_id"),
+            course_id=session_state.get("course_id"),
             created_at=datetime.fromtimestamp(row.created_at) if row.created_at else datetime.now(),
             updated_at=datetime.fromtimestamp(row.updated_at) if row.updated_at else datetime.now(),
         ))
