@@ -5,6 +5,7 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Union
 from uuid import UUID
 
 from agno.agent import Agent
+from agno.db.postgres import PostgresDb
 from agno.filters import FilterExpr
 from agno.knowledge import Knowledge
 from agno.knowledge.document import Document
@@ -16,25 +17,43 @@ from .knowledge_builder import get_lecture_knowledge, get_slide_knowledge
 
 logger = logging.getLogger(__name__)
 
+# Singleton instance for Agno database connection
+_agno_db: Optional[PostgresDb] = None
+
+
+def get_agno_db() -> PostgresDb:
+    """Get or create the shared Agno database instance for session persistence."""
+    global _agno_db
+    if _agno_db is None:
+        # Convert psycopg2 URL format to psycopg3 format required by Agno
+        db_url = settings.database_url
+        if db_url.startswith("postgresql://"):
+            db_url = db_url.replace("postgresql://", "postgresql+psycopg://", 1)
+
+        _agno_db = PostgresDb(
+            db_url=db_url,
+            db_schema="ai",  # Agno tables are in the 'ai' schema
+            session_table="agno_sessions",
+        )
+    return _agno_db
+
+
 KnowledgeFactory = Callable[[], Optional[Knowledge]]
 FilterType = Union[Dict[str, Any], Sequence[FilterExpr], None]
 ReferenceType = Union[Dict[str, Any], str]
 
 DEFAULT_INSTRUCTIONS = """
-You are StudyBuddy's course companion. Answer questions using the numbered references
-from the student's lecture transcripts and slide decks provided in the context.
+You are StudyBuddy, a friendly course companion that helps students understand their lecture materials.
 
-CITATION RULES:
-- Cite specific reference numbers in brackets: [1], [2], [3]
-- Place citations immediately after each claim: "The mitochondria is the powerhouse of the cell [2]."
+You have access to the student's lecture transcripts and slide decks through the course material retrieval tool. Use it when the student asks questions about course content, concepts, or needs help studying.
+
+WHEN USING COURSE MATERIALS:
+- Cite reference numbers in brackets after claims: "The mitochondria is the powerhouse of the cell [2]."
 - You may cite multiple sources: "This concept appears in both the slides [1] and lecture [3]."
-- If combining information from multiple references, cite all relevant numbers.
+- Point students to specific slides or lecture segments worth reviewing.
+- If the references don't contain relevant information, say so and help however you can.
 
-RESPONSE FORMAT:
-- Be concise and direct
-- Always ground your answers in the provided references
-- If the references don't contain relevant information, say so clearly
-- Recommend specific slides or lecture segments the student should review
+You don't need to look up materials for casual conversation, greetings, or general questions unrelated to the course content.
 """.strip()
 
 
@@ -185,8 +204,17 @@ def custom_retriever(
     return references or None
 
 
-def create_chat_agent(*, instructions: Optional[str] = None) -> Agent:
+def create_chat_agent(
+    *,
+    instructions: Optional[str] = None,
+    db: Optional[PostgresDb] = None,
+) -> Agent:
     """Instantiate the StudyBuddy chat agent.
+
+    Args:
+        instructions: Optional custom instructions for the agent.
+        db: Optional PostgresDb instance for session persistence.
+            When provided, enables multi-turn conversation history.
 
     Note: This agent does not use automatic knowledge retrieval. Instead,
     the chat endpoint pre-retrieves references and injects a lean, numbered
@@ -195,7 +223,7 @@ def create_chat_agent(*, instructions: Optional[str] = None) -> Agent:
     """
 
     if settings.openrouter_api_key:
-        model = OpenRouter(id="x-ai/grok-4.1-fast", api_key=settings.openrouter_api_key)
+        model = OpenRouter(id="google/gemini-3-flash-preview", api_key=settings.openrouter_api_key)
     else:
         model = Gemini(id="gemini-2.5-pro")
 
@@ -203,7 +231,12 @@ def create_chat_agent(*, instructions: Optional[str] = None) -> Agent:
         name="StudyBuddyChatAgent",
         model=model,
         instructions=instructions or DEFAULT_INSTRUCTIONS,
-        search_knowledge=False,
+        # Session persistence (enabled when db is provided)
+        db=db,
+        add_history_to_context=db is not None,  # Include previous messages in context
+        num_history_runs=10,  # Number of previous turns to include
+        # Knowledge retrieval settings
+        search_knowledge=True,
         add_knowledge_to_context=False,  # Context injected manually via formatted references
         markdown=True,
     )
@@ -247,10 +280,10 @@ def create_test_chat_agent() -> Agent:
         model=model,
         instructions=DEFAULT_INSTRUCTIONS,
         knowledge_retriever=_test_retriever,
-        search_knowledge=False,
+        search_knowledge=True,
         add_knowledge_to_context=True,
         markdown=True,
     )
 
 
-__all__ = ["create_chat_agent", "custom_retriever", "create_test_chat_agent"]
+__all__ = ["create_chat_agent", "custom_retriever", "create_test_chat_agent", "get_agno_db"]

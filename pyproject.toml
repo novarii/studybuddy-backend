@@ -4,6 +4,7 @@ version = "0.1.0"
 requires-python = ">=3.12.0"
 dependencies = [
     "agno>=2.3.0,<2.3.5",
+    "psycopg[binary]>=3.1.0",
     "clerk-backend-api>=4.0.0",
     "fastapi>=0.115.6,<1.0.0",
     "ImageHash>=4.3.1,<5.0.0",

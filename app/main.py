@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import json
 import logging
+import uuid as uuid_module
+from datetime import datetime
+from typing import List, Optional
 from urllib.parse import quote
 from uuid import UUID
 
@@ -26,7 +29,7 @@ from agno.os import AgentOS
 
 from .adapters import AgnoVercelAdapter, get_vercel_stream_headers
 from .api.auth import AuthenticatedUser, require_user
-from .agents.chat_agent import create_chat_agent, create_test_chat_agent, retrieve_documents
+from .agents.chat_agent import create_chat_agent, create_test_chat_agent, get_agno_db, retrieve_documents
 from .agents.context_formatter import format_retrieval_context
 from .core.config import settings
 from .database.db import SessionLocal, get_db
@@ -35,8 +38,11 @@ from .schemas import (
     ChatRequest,
     CourseResponse,
     CourseSyncResponse,
+    CreateSessionRequest,
+    CreateSessionResponse,
     DocumentDetailResponse,
     DocumentUploadResponse,
+    GenerateTitleResponse,
     LectureAudioUploadMetadata,
     LectureAudioUploadResponse,
     LectureDetailResponse,
@@ -44,6 +50,9 @@ from .schemas import (
     LectureDownloadResponse,
     LectureStatusListItem,
     LectureStatusResponse,
+    MessageResponse,
+    SessionListResponse,
+    SessionResponse,
 )
 from .services.course_sync_service import CourseSyncService
 from .services.document_chunk_pipeline import DocumentChunkPipeline, DocumentChunkPipelineError
@@ -637,13 +646,16 @@ async def chat_stream(
             else:
                 user_message = payload.message
 
-            # 5. Create agent and run with streaming
-            agent = create_chat_agent()
+            # 5. Create agent with persistence and run with streaming
+            agno_db = get_agno_db()
+            agent = create_chat_agent(db=agno_db)
             stream = agent.run(
                 input=user_message,
                 stream=True,
                 stream_events=True,
+                session_id=payload.session_id,  # Agno auto-generates if None
                 user_id=str(current_user.user_id),
+                metadata={"course_id": str(payload.course_id)},  # Store course_id with session
             )
 
             # 6. Transform Agno stream to Vercel format
@@ -662,6 +674,197 @@ async def chat_stream(
         generate_stream(),
         headers=get_vercel_stream_headers(),
     )
+
+
+# --- Session Management Endpoints ---
+
+
+@app.get("/api/sessions", response_model=SessionListResponse)
+async def list_sessions(
+    course_id: Optional[UUID] = None,
+    page: int = 1,
+    limit: int = 20,
+    current_user: AuthenticatedUser = Depends(require_user),
+):
+    """List user's chat sessions, optionally filtered by course."""
+    agno_db = get_agno_db()
+    agent = create_chat_agent(db=agno_db)
+
+    # Query sessions from Agno's session table
+    # We need to query the database directly since Agno doesn't provide a list_sessions method
+    from sqlalchemy import text
+
+    offset = (page - 1) * limit
+    user_id_str = str(current_user.user_id)
+
+    # Query the agno_sessions table directly
+    with agno_db.Session() as db_session:
+        # Build query with optional course_id filter
+        if course_id:
+            query = text("""
+                SELECT session_id, session_data, metadata, created_at, updated_at
+                FROM ai.agno_sessions
+                WHERE user_id = :user_id
+                AND metadata->>'course_id' = :course_id
+                ORDER BY updated_at DESC
+                LIMIT :limit OFFSET :offset
+            """)
+            count_query = text("""
+                SELECT COUNT(*) FROM ai.agno_sessions
+                WHERE user_id = :user_id
+                AND metadata->>'course_id' = :course_id
+            """)
+            params = {"user_id": user_id_str, "course_id": str(course_id), "limit": limit, "offset": offset}
+        else:
+            query = text("""
+                SELECT session_id, session_data, metadata, created_at, updated_at
+                FROM ai.agno_sessions
+                WHERE user_id = :user_id
+                ORDER BY updated_at DESC
+                LIMIT :limit OFFSET :offset
+            """)
+            count_query = text("""
+                SELECT COUNT(*) FROM ai.agno_sessions
+                WHERE user_id = :user_id
+            """)
+            params = {"user_id": user_id_str, "limit": limit, "offset": offset}
+
+        result = db_session.execute(query, params)
+        rows = result.fetchall()
+
+        count_result = db_session.execute(
+            count_query,
+            {"user_id": user_id_str, "course_id": str(course_id)} if course_id else {"user_id": user_id_str}
+        )
+        total = count_result.scalar() or 0
+
+    sessions = []
+    for row in rows:
+        session_data = row.session_data or {}
+        metadata = row.metadata or {}
+        sessions.append(SessionResponse(
+            session_id=row.session_id,
+            session_name=session_data.get("session_name"),
+            course_id=metadata.get("course_id"),
+            created_at=datetime.fromtimestamp(row.created_at) if row.created_at else datetime.now(),
+            updated_at=datetime.fromtimestamp(row.updated_at) if row.updated_at else datetime.now(),
+        ))
+
+    return SessionListResponse(
+        sessions=sessions,
+        total=total,
+        page=page,
+        limit=limit,
+    )
+
+
+@app.post("/api/sessions", response_model=CreateSessionResponse, status_code=status.HTTP_201_CREATED)
+async def create_session(
+    payload: CreateSessionRequest,
+    current_user: AuthenticatedUser = Depends(require_user),
+):
+    """Create a new chat session for a course."""
+    session_id = str(uuid_module.uuid4())
+
+    # The session will be created in Agno on first message
+    # We just return the session_id for now
+    return CreateSessionResponse(session_id=session_id)
+
+
+@app.get("/api/sessions/{session_id}/messages", response_model=List[MessageResponse])
+async def get_session_messages(
+    session_id: str,
+    current_user: AuthenticatedUser = Depends(require_user),
+):
+    """Get all messages in a session."""
+    agno_db = get_agno_db()
+    agent = create_chat_agent(db=agno_db)
+
+    # Verify session belongs to user
+    session = agent.get_session(session_id=session_id)
+    if not session or session.user_id != str(current_user.user_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
+
+    # Get chat history (user + assistant messages only)
+    messages = agent.get_chat_history(session_id=session_id)
+
+    return [
+        MessageResponse(
+            id=msg.id or str(uuid_module.uuid4()),
+            role=msg.role,
+            content=msg.content or "",
+            created_at=datetime.fromtimestamp(msg.created_at) if hasattr(msg, 'created_at') and msg.created_at else None,
+        )
+        for msg in messages
+        if msg.role in ("user", "assistant")
+    ]
+
+
+@app.delete("/api/sessions/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_session(
+    session_id: str,
+    current_user: AuthenticatedUser = Depends(require_user),
+):
+    """Delete a chat session and all its messages."""
+    agno_db = get_agno_db()
+    agent = create_chat_agent(db=agno_db)
+
+    # Verify ownership
+    session = agent.get_session(session_id=session_id)
+    if not session or session.user_id != str(current_user.user_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
+
+    agent.delete_session(session_id=session_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@app.post("/api/sessions/{session_id}/generate-title", response_model=GenerateTitleResponse)
+async def generate_session_title(
+    session_id: str,
+    current_user: AuthenticatedUser = Depends(require_user),
+):
+    """Auto-generate a title for the session based on conversation content."""
+    agno_db = get_agno_db()
+    agent = create_chat_agent(db=agno_db)
+
+    # Verify ownership
+    session = agent.get_session(session_id=session_id)
+    if not session or session.user_id != str(current_user.user_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
+
+    # Get chat history to generate title from
+    messages = agent.get_chat_history(session_id=session_id)
+    if not messages:
+        return GenerateTitleResponse(session_name=None)
+
+    # Generate title from first user message (simple approach)
+    first_user_msg = next((m for m in messages if m.role == "user"), None)
+    if first_user_msg and first_user_msg.content:
+        # Truncate to first 50 chars as a simple title
+        title = first_user_msg.content[:50]
+        if len(first_user_msg.content) > 50:
+            title += "..."
+
+        # Update session name in database
+        from sqlalchemy import text
+        with agno_db.Session() as db_session:
+            db_session.execute(
+                text("""
+                    UPDATE ai.agno_sessions
+                    SET session_data = jsonb_set(
+                        COALESCE(session_data, '{}'::jsonb),
+                        '{session_name}',
+                        :title::jsonb
+                    )
+                    WHERE session_id = :session_id
+                """),
+                {"session_id": session_id, "title": json.dumps(title)}
+            )
+            db_session.commit()
+
+        return GenerateTitleResponse(session_name=title)
+
+    return GenerateTitleResponse(session_name=None)
 
 
 test_agent = create_test_chat_agent()

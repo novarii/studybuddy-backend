@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional
+from typing import List, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, constr
@@ -112,3 +112,52 @@ class LectureAudioUploadResponse(BaseModel):
     lecture_id: UUID
     status: LectureStatus
     created: bool
+
+
+# --- Session Schemas ---
+
+
+class SessionResponse(BaseModel):
+    """Response for a single chat session."""
+
+    session_id: str
+    session_name: Optional[str] = None
+    course_id: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class SessionListResponse(BaseModel):
+    """Paginated list of sessions."""
+
+    sessions: List[SessionResponse]
+    total: int
+    page: int
+    limit: int
+
+
+class MessageResponse(BaseModel):
+    """A single message in a chat session."""
+
+    id: str
+    role: str  # "user" | "assistant"
+    content: str
+    created_at: Optional[datetime] = None
+
+
+class CreateSessionRequest(BaseModel):
+    """Request body for POST /api/sessions."""
+
+    course_id: UUID
+
+
+class CreateSessionResponse(BaseModel):
+    """Response for POST /api/sessions."""
+
+    session_id: str
+
+
+class GenerateTitleResponse(BaseModel):
+    """Response for POST /api/sessions/{id}/generate-title."""
+
+    session_name: Optional[str] = None
