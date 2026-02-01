@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Callable, Dict, List, Optional, Sequence, Union
+from typing import Any, Callable, Dict, Generator, List, Optional, Sequence, Union
 from uuid import UUID
 
 from agno.agent import Agent
@@ -11,11 +11,25 @@ from agno.knowledge import Knowledge
 from agno.knowledge.document import Document
 from agno.models.google import Gemini
 from agno.models.openrouter import OpenRouter
+from agno.run.agent import CustomEvent
 from agno.tools import tool
 
 from ..core.config import settings
 from .context_formatter import format_retrieval_context
 from .knowledge_builder import get_lecture_knowledge, get_slide_knowledge
+
+
+def create_rag_sources_event(sources: List[Dict[str, Any]]) -> CustomEvent:
+    """Create a custom event for streaming RAG sources metadata to frontend."""
+    import time
+    event = CustomEvent(
+        sources=sources,
+        created_at=int(time.time_ns()),
+        event="rag_sources",
+        agent_id="",
+        agent_name="",
+    )
+    return event
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +62,7 @@ DEFAULT_INSTRUCTIONS = """
 You are StudyBuddy, a friendly course companion that helps students understand their lecture materials.
 
 You have access to the `search_course_materials` tool to search the student's lecture transcripts and slide decks. Use it when the student asks questions about course content, concepts, or needs help studying.
+References are indexed 1-10, with 1 - 5 from slide decks and 6 - 10 from lecture transcripts, with no priority given to either source.
 
 WHEN TO USE THE SEARCH TOOL:
 - Questions about course content, concepts, or topics covered in lectures/slides
@@ -65,6 +80,7 @@ WHEN CITING COURSE MATERIALS:
 - Cite reference numbers in brackets after claims: "The mitochondria is the powerhouse of the cell [2]."
 - You may cite multiple sources: "This concept appears in both the slides [1] and lecture [3]."
 - Point students to specific slides or lecture segments worth reviewing.
+- If the student asks "What did my lecturer/teacher say about X?", prioritize lecture transcripts.
 - If the search returns no relevant information, say so and help however you can.
 """.strip()
 
@@ -164,6 +180,10 @@ def retrieve_documents(
         filters=lecture_filters,
     )
 
+    import os
+    if os.getenv("DEBUG_SEARCH_TOOL", "").lower() in ("1", "true", "yes"):
+        print(f"[RETRIEVE] Slides found: {len(slide_docs)}, Lectures found: {len(lecture_docs)}")
+
     combined = slide_docs + lecture_docs
     references: list[ReferenceType] = []
     for doc in combined:
@@ -190,22 +210,36 @@ def create_search_tool(
 
     The tool is created at request time with the user's owner_id and course_id
     so the agent can search without needing to know these identifiers.
+
+    The tool yields a RAGSourcesEvent with client_sources for the frontend,
+    then returns model_context for the LLM.
     """
 
     @tool(
         name="search_course_materials",
         description="Search the student's course materials (lecture transcripts and slide decks) for information relevant to their question.",
     )
-    def search_course_materials(query: str) -> str:
+    def search_course_materials(query: str) -> Generator[CustomEvent, None, str]:
         """
         Search course materials for relevant information.
 
         Args:
             query: The search query describing what information to find.
 
+        Yields:
+            CustomEvent with sources for frontend display.
+
         Returns:
             Formatted references from lectures and slides, numbered for citation.
         """
+        import os
+        debug = os.getenv("DEBUG_SEARCH_TOOL", "").lower() in ("1", "true", "yes")
+
+        if debug:
+            print("=" * 60)
+            print(f"[SEARCH TOOL] Query: {query}")
+            print(f"[SEARCH TOOL] Context: owner_id={owner_id}, course_id={course_id}")
+
         raw_references = retrieve_documents(
             query=query,
             num_documents=5,
@@ -215,10 +249,35 @@ def create_search_tool(
             lecture_id=lecture_id,
         )
 
+        if debug:
+            print(f"[SEARCH TOOL] Raw references count: {len(raw_references)}")
+            for i, ref in enumerate(raw_references):
+                if isinstance(ref, dict):
+                    meta = ref.get("metadata", {})
+                    content_preview = ref.get("content", "")[:100]
+                    print(f"[SEARCH TOOL] Ref {i+1}: metadata={meta}")
+                    print(f"[SEARCH TOOL] Ref {i+1}: content_preview={content_preview}...")
+                else:
+                    print(f"[SEARCH TOOL] Ref {i+1}: {str(ref)[:100]}...")
+
         if not raw_references:
+            if debug:
+                print("[SEARCH TOOL] No references found, returning empty message")
             return "No relevant course materials found for this query."
 
         formatted = format_retrieval_context(raw_references, order_by="chronological")
+
+        if debug:
+            print(f"[SEARCH TOOL] Client sources count: {len(formatted.client_sources)}")
+            for i, src in enumerate(formatted.client_sources):
+                print(f"[SEARCH TOOL] Source {i+1}: {src}")
+            print(f"[SEARCH TOOL] Model context:\n{formatted.model_context}")
+            print("=" * 60)
+
+        # Yield custom event with sources for frontend before returning model context
+        if formatted.client_sources:
+            yield create_rag_sources_event(formatted.client_sources)
+
         return formatted.model_context or "No relevant course materials found for this query."
 
     return search_course_materials

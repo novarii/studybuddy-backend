@@ -566,9 +566,10 @@ async def download_document_file(
     except FileNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Stored file not found") from exc
     # Use RFC 5987 encoding to prevent header injection from malicious filenames
+    # Use "inline" to display in iframe/browser, not force download
     safe_filename = quote(document.filename, safe='')
     headers = {
-        "Content-Disposition": f"attachment; filename*=UTF-8''{safe_filename}"
+        "Content-Disposition": f"inline; filename*=UTF-8''{safe_filename}"
     }
     return StreamingResponse(file_stream, media_type=document.mime_type, headers=headers)
 

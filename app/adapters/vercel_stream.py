@@ -37,6 +37,7 @@ from agno.run.agent import (
     ToolCallStartedEvent,
     ToolCallCompletedEvent,
     BaseAgentRunEvent,
+    CustomEvent,
 )
 
 logger = logging.getLogger(__name__)
@@ -404,6 +405,14 @@ class AgnoVercelAdapter:
                     tool_call_id=tool_call_id,
                     output=event.tool.result,
                 )
+
+        elif isinstance(event, CustomEvent):
+            # Handle RAGSourcesEvent (custom event with sources attribute)
+            if hasattr(event, "sources") and event.sources:
+                sources = self.extract_sources_from_references(event.sources)
+                if sources:
+                    yield self._emit_all_sources(sources)
+                    self._sources_emitted = True
 
     def transform_stream_sync(
         self,
