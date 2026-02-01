@@ -18,13 +18,29 @@ StudyBuddy Backend is a FastAPI-based educational content platform that ingests 
 - **PyMuPDF** for PDF parsing and slide extraction
 - **Clerk Backend API** for user authentication
 
-## Docs
-- We keep all important docs in .agent folder and keep them updated. This is the structure:
-.agent
-- Tasks: PRD & implementation plan for each feature
-- System: Document the current state of the system (project structure, tech stack, integration points, database schema, and core functionalities)
-- SOP: Best practices of execute certain tasks (e.g. how to add a schema migration, how to add a new endpoint, etc.)
-- README.md: an index of all the documentations we have so people know what & where to look for things
+## Documentation
+
+This project follows **spec-driven development**:
+
+### What is a Spec?
+A **spec** is an atomic source of truth document that contains:
+- Requirements and constraints
+- Architecture decisions and rationale
+- Code patterns and guidelines
+- Implementation standards
+
+**Key principles:**
+- 1 topic of concern = 1 spec file
+- Specs are referenced by implementation tasks
+- Implementation plans should be self-contained (reference specs or include all needed info)
+
+### Directory Structure
+- **`specs/`** - Specification documents (architecture, standards, patterns)
+  - `specs/README.md` - Lookup table of all specs with descriptions
+- **`tasks/`** - Implementation plans that reference specs
+- **`archives/`** - Historical audits and completed work
+
+**See `specs/README.md` for the complete spec lookup table.**
 
 ## Development Commands
 
@@ -161,13 +177,19 @@ Routes (app/main.py)
 - Add docstrings for functions with side effects
 - Configuration via environment variables + Settings dataclass
 
-## Documentation Structure
+## Adding New Specs
 
-The `.agent/` directory contains important documentation:
-- **Tasks/**: PRD & implementation plans for each feature
-- **System/**: Current state documentation (project structure, tech stack, database schema)
-- **SOP/**: Best practices (how to add migrations, endpoints, etc.)
-- **README.md**: Index of all documentation
+When adding a new spec:
+1. Identify the **topic of concern** (one topic per spec)
+2. Create `specs/{topic-name}.md`
+3. Include `**Status:** Accepted` at the top
+4. Add to the lookup table in `specs/README.md`
+5. Link from related specs if needed
+
+When creating implementation plans:
+- Create tasks in `tasks/{feature-name}.md`
+- Reference relevant specs instead of duplicating information
+- Include context if no spec exists for the topic
 
 ## Migration Management
 
