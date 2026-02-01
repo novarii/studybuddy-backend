@@ -1,3 +1,5 @@
+**Status:** Accepted
+
 # Lecture Chunk & Knowledge Pipeline
 
 ## Purpose

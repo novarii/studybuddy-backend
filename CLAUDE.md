@@ -35,12 +35,12 @@ A **spec** is an atomic source of truth document that contains:
 - Implementation plans should be self-contained (reference specs or include all needed info)
 
 ### Directory Structure
-- **`specs/`** - Specification documents (architecture, standards, patterns)
-  - `specs/README.md` - Lookup table of all specs with descriptions
-- **`tasks/`** - Implementation plans that reference specs
-- **`archives/`** - Historical audits and completed work
+- **`.agent/specs/`** - Specification documents (architecture, standards, patterns)
+  - `.agent/specs/README.md` - Lookup table of all specs with descriptions
+- **`.agent/tasks/`** - Implementation plans that reference specs
+- **`.agent/archives/`** - Historical audits and completed work
 
-**See `specs/README.md` for the complete spec lookup table.**
+**See `.agent/specs/README.md` for the complete spec lookup table.**
 
 ## Development Commands
 
@@ -181,13 +181,13 @@ Routes (app/main.py)
 
 When adding a new spec:
 1. Identify the **topic of concern** (one topic per spec)
-2. Create `specs/{topic-name}.md`
+2. Create `.agent/specs/{topic-name}.md`
 3. Include `**Status:** Accepted` at the top
-4. Add to the lookup table in `specs/README.md`
+4. Add to the lookup table in `.agent/specs/README.md`
 5. Link from related specs if needed
 
 When creating implementation plans:
-- Create tasks in `tasks/{feature-name}.md`
+- Create tasks in `.agent/tasks/{feature-name}.md`
 - Reference relevant specs instead of duplicating information
 - Include context if no spec exists for the topic
 

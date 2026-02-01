@@ -1,3 +1,5 @@
+**Status:** Accepted
+
 # Slide Chunk & Knowledge Pipeline
 
 ## Purpose

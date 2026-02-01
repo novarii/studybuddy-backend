@@ -1,5 +1,8 @@
 # Database Schema
 
+**Status:** Accepted
+# Database Schema
+
 Schema is provisioned by the SQL migrations under `migrations/versions/` (001–005 as of now). PostgreSQL is the source of truth for all metadata (files are referenced via logical storage keys only).
 
 ## Enumerations

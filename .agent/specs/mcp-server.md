@@ -1,3 +1,5 @@
+**Status:** Accepted
+
 # MCP Knowledge Server
 
 ## Purpose
