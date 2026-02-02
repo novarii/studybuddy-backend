@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import uuid as uuid_module
 from datetime import datetime
 from typing import List, Optional
@@ -704,6 +705,15 @@ async def chat_stream(
                     session_data = session.session_data or {}
                     if not session_data.get("session_name"):
                         agent.set_session_name(session_id=payload.session_id, autogenerate=True)
+                        # Clean up generated title (remove "StudyBuddy" mentions)
+                        session = agent.get_session(session_id=payload.session_id)
+                        if session:
+                            generated_name = (session.session_data or {}).get("session_name", "")
+                            if generated_name:
+                                cleaned = re.sub(r'\bstudybuddy\b', '', generated_name, flags=re.IGNORECASE).strip()
+                                cleaned = re.sub(r'\s+', ' ', cleaned).strip(" -:,")  # Clean up extra spaces/punctuation
+                                if cleaned and cleaned != generated_name:
+                                    agent.set_session_name(session_id=payload.session_id, name=cleaned)
             except Exception as e:
                 logger.warning(f"Failed to auto-generate session title: {e}")
 
