@@ -670,8 +670,12 @@ async def chat_stream(
             yield adapter._emit_error(f"Stream error: {str(e)}")
             yield adapter._emit_done()
         finally:
+            if not payload.session_id or not agent:
+                return
+
+            session = None
             # Persist collected sources after streaming completes
-            if adapter.collected_sources and payload.session_id and adapter.agno_run_id and agent:
+            if adapter.collected_sources and adapter.agno_run_id:
                 try:
                     # Get the actual assistant message ID from Agno's run
                     session = agent.get_session(session_id=payload.session_id)
@@ -691,6 +695,17 @@ async def chat_stream(
                                     break
                 except Exception as e:
                     logger.warning(f"Failed to save message sources: {e}")
+
+            # Auto-generate session title after first message
+            try:
+                if session is None:
+                    session = agent.get_session(session_id=payload.session_id)
+                if session:
+                    session_data = session.session_data or {}
+                    if not session_data.get("session_name"):
+                        agent.set_session_name(session_id=payload.session_id, autogenerate=True)
+            except Exception as e:
+                logger.warning(f"Failed to auto-generate session title: {e}")
 
     return StreamingResponse(
         generate_stream(),
