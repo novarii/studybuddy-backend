@@ -19,10 +19,11 @@ A **spec** is an atomic source of truth document. It can contain:
 
 ## Spec Lookup Table
 
-*Last updated: 2026-02-01*
+*Last updated: 2026-02-02*
 
 | Spec | Description | Key Topics |
 |------|-------------|------------|
+| [migration/00-overview.md](./migration/00-overview.md) | Backend migration plan | Python → Next.js/TypeScript, AI SDK, OpenRouter BYOK |
 | [architecture.md](./architecture.md) | System architecture and design | Layered structure, service layer, agents, data flows |
 | [tech-stack.md](./tech-stack.md) | Technology choices and rationale | FastAPI, SQLAlchemy, Agno, Voyage AI, pgvector |
 | [database-schema.md](./database-schema.md) | Database design and relationships | Tables, constraints, indexes, status enums |
