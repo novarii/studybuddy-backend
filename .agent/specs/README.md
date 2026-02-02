@@ -36,6 +36,7 @@ A **spec** is an atomic source of truth document. It can contain:
 | [mcp-server.md](./mcp-server.md) | Model Context Protocol integration | FastMCP, tool exposure, retrieval |
 | [storage-backend.md](./storage-backend.md) | Storage abstraction layer | Logical keys, local backend, swappable design |
 | [security-requirements.md](./security-requirements.md) | Security standards | CORS, auth, file limits, path traversal, injection |
+| [message-sources-persistence.md](./message-sources-persistence.md) | RAG sources persistence | message_sources table, save/load sources with messages |
 
 ---
 

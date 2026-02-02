@@ -37,6 +37,7 @@ from agno.run.agent import (
     ToolCallStartedEvent,
     ToolCallCompletedEvent,
     BaseAgentRunEvent,
+    CustomEvent,
 )
 
 logger = logging.getLogger(__name__)
@@ -96,6 +97,8 @@ class AgnoVercelAdapter:
         self._text_started = False
         self._reasoning_started = False
         self._sources_emitted = False
+        self._collected_sources: List[RAGSource] = []
+        self._agno_run_id: Optional[str] = None
 
     def _sse_event(self, data: Dict[str, Any]) -> str:
         """Format a single SSE event line."""
@@ -196,6 +199,7 @@ class AgnoVercelAdapter:
 
     def _emit_all_sources(self, sources: List[RAGSource]) -> str:
         """Emit all source events (both native and custom formats)."""
+        self._collected_sources.extend(sources)
         output = ""
         for source in sources:
             # Emit native source-document for UI compatibility
@@ -203,6 +207,16 @@ class AgnoVercelAdapter:
             # Emit custom data-rag-source with full metadata
             output += self._emit_rag_source(source)
         return output
+
+    @property
+    def collected_sources(self) -> List[RAGSource]:
+        """Return all sources collected during streaming."""
+        return self._collected_sources
+
+    @property
+    def agno_run_id(self) -> Optional[str]:
+        """Return the Agno run_id captured from RunCompletedEvent."""
+        return self._agno_run_id
 
     def extract_sources_from_references(
         self, references: Optional[List[Union[Dict[str, Any], str]]]
@@ -346,6 +360,10 @@ class AgnoVercelAdapter:
             pass
 
         elif isinstance(event, RunCompletedEvent):
+            # Capture the Agno run_id for source persistence
+            if hasattr(event, "run_id") and event.run_id:
+                self._agno_run_id = event.run_id
+
             # Handle references if not yet emitted
             if event.references and not self._sources_emitted:
                 sources = self._extract_sources_from_message_references(event.references)
@@ -404,6 +422,14 @@ class AgnoVercelAdapter:
                     tool_call_id=tool_call_id,
                     output=event.tool.result,
                 )
+
+        elif isinstance(event, CustomEvent):
+            # Handle RAGSourcesEvent (custom event with sources attribute)
+            if hasattr(event, "sources") and event.sources:
+                sources = self.extract_sources_from_references(event.sources)
+                if sources:
+                    yield self._emit_all_sources(sources)
+                    self._sources_emitted = True
 
     def transform_stream_sync(
         self,

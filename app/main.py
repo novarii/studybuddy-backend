@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import uuid as uuid_module
 from datetime import datetime
 from typing import List, Optional
@@ -50,6 +51,7 @@ from .schemas import (
     LectureStatusListItem,
     LectureStatusResponse,
     MessageResponse,
+    RAGSourceResponse,
     SessionListResponse,
     SessionResponse,
 )
@@ -61,6 +63,7 @@ from .services.downloaders.panopto_downloader import PanoptoPackageDownloader
 from .services.lecture_chunk_pipeline import LectureChunkPipeline
 from .services.lectures_service import LecturesService
 from .services.transcription_service import WhisperTranscriptionClient
+from .services.message_sources_service import save_message_sources, load_sources_for_messages, delete_sources_for_session
 from .storage import LocalStorageBackend
 
 app = FastAPI(title="StudyBuddy Backend")
@@ -472,6 +475,32 @@ async def list_course_documents(
     ]
 
 
+@app.get("/api/courses/{course_id}/lectures", response_model=list[LectureDetailResponse])
+async def list_course_lectures(
+    course_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: AuthenticatedUser = Depends(require_user),
+):
+    """List all lectures for a course that the user has access to."""
+    lectures = lectures_service.list_lectures_for_course(db, course_id, current_user.user_id)
+    return [
+        LectureDetailResponse(
+            id=lecture.id,
+            course_id=lecture.course_id,
+            panopto_session_id=lecture.panopto_session_id,
+            panopto_url=lecture.panopto_url,
+            stream_url=lecture.stream_url,
+            title=lecture.title,
+            duration_seconds=lecture.duration_seconds,
+            status=lecture.status,
+            error_message=lecture.error_message,
+            created_at=lecture.created_at,
+            updated_at=lecture.updated_at,
+        )
+        for lecture in lectures
+    ]
+
+
 @app.post("/api/documents/upload", response_model=DocumentUploadResponse)
 async def upload_document(
     response: Response,
@@ -566,9 +595,10 @@ async def download_document_file(
     except FileNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Stored file not found") from exc
     # Use RFC 5987 encoding to prevent header injection from malicious filenames
+    # Use "inline" to display in iframe/browser, not force download
     safe_filename = quote(document.filename, safe='')
     headers = {
-        "Content-Disposition": f"attachment; filename*=UTF-8''{safe_filename}"
+        "Content-Disposition": f"inline; filename*=UTF-8''{safe_filename}"
     }
     return StreamingResponse(file_stream, media_type=document.mime_type, headers=headers)
 
@@ -608,6 +638,7 @@ async def chat_stream(
 
     async def generate_stream():
         adapter = AgnoVercelAdapter()
+        agent = None
 
         try:
             # Create search tool with user's context
@@ -639,6 +670,52 @@ async def chat_stream(
             logger.exception("Chat stream error")
             yield adapter._emit_error(f"Stream error: {str(e)}")
             yield adapter._emit_done()
+        finally:
+            if not payload.session_id or not agent:
+                return
+
+            session = None
+            # Persist collected sources after streaming completes
+            if adapter.collected_sources and adapter.agno_run_id:
+                try:
+                    # Get the actual assistant message ID from Agno's run
+                    session = agent.get_session(session_id=payload.session_id)
+                    if session:
+                        run = session.get_run(adapter.agno_run_id)
+                        if run and run.messages:
+                            # Find the assistant message in this run
+                            for msg in reversed(run.messages):
+                                if msg.role == "assistant" and msg.id:
+                                    with SessionLocal() as db_session:
+                                        save_message_sources(
+                                            db_session,
+                                            message_id=msg.id,
+                                            session_id=payload.session_id,
+                                            sources=adapter.collected_sources,
+                                        )
+                                    break
+                except Exception as e:
+                    logger.warning(f"Failed to save message sources: {e}")
+
+            # Auto-generate session title after first message
+            try:
+                if session is None:
+                    session = agent.get_session(session_id=payload.session_id)
+                if session:
+                    session_data = session.session_data or {}
+                    if not session_data.get("session_name"):
+                        agent.set_session_name(session_id=payload.session_id, autogenerate=True)
+                        # Clean up generated title (remove "StudyBuddy" mentions)
+                        session = agent.get_session(session_id=payload.session_id)
+                        if session:
+                            generated_name = (session.session_data or {}).get("session_name", "")
+                            if generated_name:
+                                cleaned = re.sub(r'\bstudybuddy\b', '', generated_name, flags=re.IGNORECASE).strip()
+                                cleaned = re.sub(r'\s+', ' ', cleaned).strip(" -:,")  # Clean up extra spaces/punctuation
+                                if cleaned and cleaned != generated_name:
+                                    agent.set_session_name(session_id=payload.session_id, name=cleaned)
+            except Exception as e:
+                logger.warning(f"Failed to auto-generate session title: {e}")
 
     return StreamingResponse(
         generate_stream(),
@@ -746,6 +823,7 @@ async def create_session(
 async def get_session_messages(
     session_id: str,
     current_user: AuthenticatedUser = Depends(require_user),
+    db: Session = Depends(get_db),
 ):
     """Get all messages in a session."""
     agno_db = get_agno_db()
@@ -758,6 +836,14 @@ async def get_session_messages(
 
     # Get chat history (user + assistant messages only)
     messages = agent.get_chat_history(session_id=session_id)
+    filtered_messages = [msg for msg in messages if msg.role in ("user", "assistant")]
+
+    # Load sources for assistant messages
+    assistant_msg_ids = [
+        msg.id for msg in filtered_messages
+        if msg.role == "assistant" and msg.id
+    ]
+    sources_by_message = load_sources_for_messages(db, assistant_msg_ids) if assistant_msg_ids else {}
 
     return [
         MessageResponse(
@@ -765,9 +851,11 @@ async def get_session_messages(
             role=msg.role,
             content=msg.content or "",
             created_at=datetime.fromtimestamp(msg.created_at) if hasattr(msg, 'created_at') and msg.created_at else None,
+            sources=[
+                RAGSourceResponse(**src) for src in sources_by_message.get(msg.id, [])
+            ] if msg.role == "assistant" and msg.id else None,
         )
-        for msg in messages
-        if msg.role in ("user", "assistant")
+        for msg in filtered_messages
     ]
 
 
@@ -775,6 +863,7 @@ async def get_session_messages(
 async def delete_session(
     session_id: str,
     current_user: AuthenticatedUser = Depends(require_user),
+    db: Session = Depends(get_db),
 ):
     """Delete a chat session and all its messages."""
     agno_db = get_agno_db()
@@ -785,6 +874,8 @@ async def delete_session(
     if not session or session.user_id != str(current_user.user_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
 
+    # Delete message sources first, then the session
+    delete_sources_for_session(db, session_id)
     agent.delete_session(session_id=session_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
