@@ -136,6 +136,22 @@ class SessionListResponse(BaseModel):
     limit: int
 
 
+class RAGSourceResponse(BaseModel):
+    """RAG source metadata for citation references."""
+
+    source_id: str
+    source_type: str
+    content_preview: Optional[str] = None
+    chunk_number: int
+    document_id: Optional[str] = None
+    slide_number: Optional[int] = None
+    lecture_id: Optional[str] = None
+    start_seconds: Optional[float] = None
+    end_seconds: Optional[float] = None
+    course_id: Optional[str] = None
+    title: Optional[str] = None
+
+
 class MessageResponse(BaseModel):
     """A single message in a chat session."""
 
@@ -143,6 +159,7 @@ class MessageResponse(BaseModel):
     role: str  # "user" | "assistant"
     content: str
     created_at: Optional[datetime] = None
+    sources: Optional[List[RAGSourceResponse]] = None
 
 
 class CreateSessionRequest(BaseModel):

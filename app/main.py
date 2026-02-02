@@ -50,6 +50,7 @@ from .schemas import (
     LectureStatusListItem,
     LectureStatusResponse,
     MessageResponse,
+    RAGSourceResponse,
     SessionListResponse,
     SessionResponse,
 )
@@ -61,6 +62,7 @@ from .services.downloaders.panopto_downloader import PanoptoPackageDownloader
 from .services.lecture_chunk_pipeline import LectureChunkPipeline
 from .services.lectures_service import LecturesService
 from .services.transcription_service import WhisperTranscriptionClient
+from .services.message_sources_service import save_message_sources, load_sources_for_messages, delete_sources_for_session
 from .storage import LocalStorageBackend
 
 app = FastAPI(title="StudyBuddy Backend")
@@ -635,6 +637,7 @@ async def chat_stream(
 
     async def generate_stream():
         adapter = AgnoVercelAdapter()
+        agent = None
 
         try:
             # Create search tool with user's context
@@ -666,6 +669,28 @@ async def chat_stream(
             logger.exception("Chat stream error")
             yield adapter._emit_error(f"Stream error: {str(e)}")
             yield adapter._emit_done()
+        finally:
+            # Persist collected sources after streaming completes
+            if adapter.collected_sources and payload.session_id and adapter.agno_run_id and agent:
+                try:
+                    # Get the actual assistant message ID from Agno's run
+                    session = agent.get_session(session_id=payload.session_id)
+                    if session:
+                        run = session.get_run(adapter.agno_run_id)
+                        if run and run.messages:
+                            # Find the assistant message in this run
+                            for msg in reversed(run.messages):
+                                if msg.role == "assistant" and msg.id:
+                                    with SessionLocal() as db_session:
+                                        save_message_sources(
+                                            db_session,
+                                            message_id=msg.id,
+                                            session_id=payload.session_id,
+                                            sources=adapter.collected_sources,
+                                        )
+                                    break
+                except Exception as e:
+                    logger.warning(f"Failed to save message sources: {e}")
 
     return StreamingResponse(
         generate_stream(),
@@ -773,6 +798,7 @@ async def create_session(
 async def get_session_messages(
     session_id: str,
     current_user: AuthenticatedUser = Depends(require_user),
+    db: Session = Depends(get_db),
 ):
     """Get all messages in a session."""
     agno_db = get_agno_db()
@@ -785,6 +811,14 @@ async def get_session_messages(
 
     # Get chat history (user + assistant messages only)
     messages = agent.get_chat_history(session_id=session_id)
+    filtered_messages = [msg for msg in messages if msg.role in ("user", "assistant")]
+
+    # Load sources for assistant messages
+    assistant_msg_ids = [
+        msg.id for msg in filtered_messages
+        if msg.role == "assistant" and msg.id
+    ]
+    sources_by_message = load_sources_for_messages(db, assistant_msg_ids) if assistant_msg_ids else {}
 
     return [
         MessageResponse(
@@ -792,9 +826,11 @@ async def get_session_messages(
             role=msg.role,
             content=msg.content or "",
             created_at=datetime.fromtimestamp(msg.created_at) if hasattr(msg, 'created_at') and msg.created_at else None,
+            sources=[
+                RAGSourceResponse(**src) for src in sources_by_message.get(msg.id, [])
+            ] if msg.role == "assistant" and msg.id else None,
         )
-        for msg in messages
-        if msg.role in ("user", "assistant")
+        for msg in filtered_messages
     ]
 
 
@@ -802,6 +838,7 @@ async def get_session_messages(
 async def delete_session(
     session_id: str,
     current_user: AuthenticatedUser = Depends(require_user),
+    db: Session = Depends(get_db),
 ):
     """Delete a chat session and all its messages."""
     agno_db = get_agno_db()
@@ -812,6 +849,8 @@ async def delete_session(
     if not session or session.user_id != str(current_user.user_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
 
+    # Delete message sources first, then the session
+    delete_sources_for_session(db, session_id)
     agent.delete_session(session_id=session_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
